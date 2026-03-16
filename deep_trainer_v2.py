@@ -46,8 +46,9 @@ class DeepLearningTrainerV2:
         self.database_url = database_url
         self.conn = self._connect_db()
         
-        # 6 موديلات منفصلة
+        # 6 موديلات منفصلة + AI Brain
         self.models = {
+            'ai_brain': None,      # AI Brain 
             'mtf': None,           # Multi-Timeframe
             'risk': None,          # Risk Manager
             'anomaly': None,       # Anomaly Detector
@@ -59,7 +60,7 @@ class DeepLearningTrainerV2:
         self.sequence_length = 10
         self.min_trades_for_training = 100
         
-        print("🧠 Deep Learning Trainer V2 initialized (6 LSTM Models)")
+        print("🧠 Deep Learning Trainer V2 initialized (7 LSTM Models)")
     
     def _connect_db(self):
         """Connect to PostgreSQL"""
@@ -211,6 +212,74 @@ class DeepLearningTrainerV2:
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ MTF Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
+    def train_ai_brain_model(self, trades):
+        """Train AI Brain (الملك) - القرار النهائي"""
+        print("\n👑 Training AI Brain Model (الملك)...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                # الملك ياخذ كل المعلومات
+                features = [
+                    data.get('rsi', 50),
+                    data.get('macd', 0),
+                    data.get('volume_ratio', 1),
+                    data.get('price_momentum', 0),
+                    data.get('confidence', 60),
+                    data.get('mtf_score', 0),
+                    data.get('risk_score', 0),
+                    data.get('anomaly_score', 0),
+                    data.get('exit_score', 0),
+                    data.get('pattern_score', 0),
+                    data.get('ranking_score', 0)
+                ]
+                
+                profit = float(trade.get('profit_percent', 0))
+                # الملك يتعلم: هل القرار كان صح؟ (ربح = 1, خسارة = 0)
+                label = 1 if profit > 0.5 else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for AI Brain")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        # الملك يحتاج موديل أكبر (أذكى)
+        model = keras.Sequential([
+            layers.Input(shape=(self.sequence_length, X.shape[2])),
+            layers.LSTM(128, return_sequences=True),  # أكبر من الباقي
+            layers.Dropout(0.3),
+            layers.LSTM(64, return_sequences=False),
+            layers.Dropout(0.2),
+            layers.Dense(32, activation='relu'),
+            layers.Dropout(0.2),
+            layers.Dense(1, activation='sigmoid')
+        ])
+        
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)  # epochs أكثر
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"👑 AI Brain Model: Accuracy {accuracy*100:.2f}% (الملك)")
         
         return model, accuracy
     
@@ -483,9 +552,9 @@ class DeepLearningTrainerV2:
         return model, accuracy
     
     def train_all_models(self):
-        """Train all 6 models"""
+        """Train all 7 models (AI Brain + 6 Consultants)"""
         print("\n" + "="*60)
-        print("🎓 Starting Training - 6 LSTM Models")
+        print("👑 Starting Training - 7 LSTM Models")
         print("="*60)
         
         trades = self.load_training_data()
@@ -494,7 +563,15 @@ class DeepLearningTrainerV2:
         
         results = {}
         
-        # Train each model
+        # 👑 الملك يتدرب أول (الأهم)
+        try:
+            result = self.train_ai_brain_model(trades)
+            if result:
+                self.models['ai_brain'], results['ai_brain_accuracy'] = result
+        except Exception as e:
+            print(f"❌ AI Brain training error: {e}")
+        
+        # Train consultant models
         try:
             result = self.train_mtf_model(trades)
             if result:
@@ -543,7 +620,7 @@ class DeepLearningTrainerV2:
         # Save to database
         self.save_models_to_db(results)
         
-        print("\n✅ All models trained successfully!")
+        print("\n✅ All 7 models trained successfully!")
         return True
     
     def save_all_models(self):
