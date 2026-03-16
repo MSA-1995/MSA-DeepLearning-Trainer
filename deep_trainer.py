@@ -1,6 +1,7 @@
 """
 🧠 Deep Learning Trainer - Advanced AI for Trading Bot
-Trains advisors and provides predictions using Deep Neural Networks
+Trains advisors using LSTM (Long Short-Term Memory) Neural Networks
+Optimized for time-series prediction in trading
 """
 
 # ========== LOAD ENV FILE ==========
@@ -52,9 +53,10 @@ class DeepLearningTrainer:
             'mtf_score', 'risk_score', 'anomaly_score', 
             'exit_score', 'pattern_score', 'ranking_score'
         ]
-        self.min_trades_for_training = 50
+        self.sequence_length = 10  # آخر 10 نقاط زمنية
+        self.min_trades_for_training = 100  # نحتاج بيانات أكثر للـ LSTM
         
-        print("🧠 Deep Learning Trainer initialized")
+        print("🧠 Deep Learning Trainer initialized (LSTM)")
     
     def _connect_db(self):
         """Connect to PostgreSQL"""
@@ -88,13 +90,14 @@ class DeepLearningTrainer:
         return self.conn
     
     def load_training_data(self):
-        """Load historical trades for training"""
+        """Load historical trades for LSTM training (time sequences)"""
         if not self.conn:
             return None, None
         
         try:
             cursor = self._get_conn().cursor(cursor_factory=RealDictCursor)
             
+            # جلب الصفقات مرتبة حسب الوقت
             cursor.execute("""
                 SELECT 
                     symbol,
@@ -105,8 +108,8 @@ class DeepLearningTrainer:
                 FROM trades_history
                 WHERE action = 'SELL'
                 AND data IS NOT NULL
-                ORDER BY timestamp DESC
-                LIMIT 1000
+                ORDER BY timestamp ASC
+                LIMIT 2000
             """)
             
             trades = cursor.fetchall()
@@ -116,8 +119,9 @@ class DeepLearningTrainer:
                 print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
                 return None, None
             
-            X = []
-            y = []
+            # تحويل الصفقات لـ sequences
+            all_features = []
+            all_labels = []
             
             for trade in trades:
                 try:
@@ -142,35 +146,58 @@ class DeepLearningTrainer:
                     profit = float(trade.get('profit_percent', 0))
                     label = 1 if profit > 0 else 0
                     
-                    X.append(features)
-                    y.append(label)
+                    all_features.append(features)
+                    all_labels.append(label)
                 
                 except Exception:
                     continue
             
-            if len(X) < self.min_trades_for_training:
-                print(f"⚠️ Not enough valid trades. Need {self.min_trades_for_training}, have {len(X)}")
+            if len(all_features) < self.min_trades_for_training:
+                print(f"⚠️ Not enough valid trades. Need {self.min_trades_for_training}, have {len(all_features)}")
                 return None, None
             
-            print(f"📊 Loaded {len(X)} trades")
+            # إنشاء sequences للـ LSTM
+            X_sequences = []
+            y_sequences = []
+            
+            for i in range(len(all_features) - self.sequence_length):
+                # آخر sequence_length من الصفقات
+                sequence = all_features[i:i + self.sequence_length]
+                label = all_labels[i + self.sequence_length]  # التوقع للصفقة التالية
+                
+                X_sequences.append(sequence)
+                y_sequences.append(label)
+            
+            X = np.array(X_sequences, dtype=np.float32)
+            y = np.array(y_sequences, dtype=np.float32)
+            
+            print(f"📊 Created {len(X)} sequences (length={self.sequence_length})")
             print(f"   Profitable: {sum(y)} ({sum(y)/len(y)*100:.1f}%)")
             print(f"   Losses: {len(y)-sum(y)} ({(len(y)-sum(y))/len(y)*100:.1f}%)")
             
-            return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
+            return X, y
         
         except Exception as e:
             print(f"❌ Error loading data: {e}")
             return None, None
     
-    def build_model(self, input_dim):
-        """Build Deep Neural Network"""
+    def build_model(self, sequence_length, n_features):
+        """Build LSTM Neural Network for time-series prediction"""
         model = keras.Sequential([
-            layers.Input(shape=(input_dim,)),
-            layers.Dense(64, activation='relu'),
+            # Input: (sequence_length, n_features)
+            layers.Input(shape=(sequence_length, n_features)),
+            
+            # LSTM layers
+            layers.LSTM(64, return_sequences=True),
             layers.Dropout(0.3),
-            layers.Dense(32, activation='relu'),
+            
+            layers.LSTM(32, return_sequences=False),
             layers.Dropout(0.2),
+            
+            # Dense layers
             layers.Dense(16, activation='relu'),
+            layers.Dropout(0.2),
+            
             layers.Dense(1, activation='sigmoid')
         ])
         
@@ -183,9 +210,9 @@ class DeepLearningTrainer:
         return model
     
     def train_model(self):
-        """Train Deep Learning model"""
+        """Train LSTM model"""
         print("\n" + "="*60)
-        print("🎓 Starting Deep Learning Training...")
+        print("🎓 Starting LSTM Training...")
         print("="*60)
         
         X, y = self.load_training_data()
@@ -197,15 +224,16 @@ class DeepLearningTrainer:
         X_train, X_test = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
         
-        print(f"\n📚 Training set: {len(X_train)} trades")
-        print(f"🧪 Test set: {len(X_test)} trades")
+        print(f"\n📚 Training set: {len(X_train)} sequences")
+        print(f"🧪 Test set: {len(X_test)} sequences")
         
         # Build model
-        print("\n🧠 Building Deep Neural Network...")
-        self.model = self.build_model(X.shape[1])
+        print(f"\n🧠 Building LSTM Network...")
+        print(f"   Input shape: ({self.sequence_length}, {len(self.feature_names)})")
+        self.model = self.build_model(X.shape[1], X.shape[2])
         
         # Train
-        print("\n🎓 Training...")
+        print("\n🎓 Training LSTM...")
         history = self.model.fit(
             X_train, y_train,
             epochs=50,
@@ -296,11 +324,12 @@ class DeepLearningTrainer:
             cursor.execute("DELETE FROM dl_predictions")
             
             predictions_data = {
-                'model_type': 'DeepNeuralNetwork',
+                'model_type': 'LSTM',
                 'features': self.feature_names,
+                'sequence_length': self.sequence_length,
                 'trained_at': datetime.now().isoformat(),
                 'status': 'active',
-                'layers': [64, 32, 16, 1],
+                'layers': ['LSTM(64)', 'LSTM(32)', 'Dense(16)', 'Dense(1)'],
                 'accuracy': float(accuracy)
             }
             
