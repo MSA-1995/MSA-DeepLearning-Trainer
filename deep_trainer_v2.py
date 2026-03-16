@@ -1,6 +1,6 @@
 """
-🧠 Deep Learning Trainer V2 - 6 Specialized LSTM Models
-Trains 6 independent LSTM models for trading decisions
+🧠 Deep Learning Trainer V3 - 8 Specialized Models (7 LSTM + 1 CNN)
+Trains AI Brain + 7 Consultant Models for trading decisions
 """
 
 # ========== LOAD ENV FILE ==========
@@ -46,21 +46,22 @@ class DeepLearningTrainerV2:
         self.database_url = database_url
         self.conn = self._connect_db()
         
-        # 6 موديلات منفصلة + AI Brain
+        # 8 موديلات: AI Brain + 7 مستشارين (6 LSTM + 1 CNN)
         self.models = {
-            'ai_brain': None,      # AI Brain 
-            'mtf': None,           # Multi-Timeframe
-            'risk': None,          # Risk Manager
-            'anomaly': None,       # Anomaly Detector
-            'exit': None,          # Exit Strategy
-            'pattern': None,       # Pattern Recognition
-            'ranking': None        # Coin Ranking
+            'ai_brain': None,      # AI Brain - LSTM
+            'mtf': None,           # Multi-Timeframe - LSTM
+            'risk': None,          # Risk Manager - LSTM
+            'anomaly': None,       # Anomaly Detector - LSTM
+            'exit': None,          # Exit Strategy - LSTM
+            'pattern': None,       # Pattern Recognition - LSTM
+            'ranking': None,       # Coin Ranking - LSTM
+            'chart_cnn': None      # Chart Pattern Analyzer - CNN (جديد)
         }
         
         self.sequence_length = 10
         self.min_trades_for_training = 100
         
-        print("🧠 Deep Learning Trainer V2 initialized (7 LSTM Models)")
+        print("🧠 Deep Learning Trainer V3 initialized (8 Models: 7 LSTM + 1 CNN)")
     
     def _connect_db(self):
         """Connect to PostgreSQL"""
@@ -167,6 +168,63 @@ class DeepLearningTrainerV2:
         
         return np.array(X_sequences, dtype=np.float32), np.array(y_sequences, dtype=np.float32)
     
+    def calculate_enhanced_features(self, data):
+        """Feature Engineering: حساب مؤشرات إضافية"""
+        try:
+            rsi = data.get('rsi', 50)
+            macd = data.get('macd', 0)
+            volume_ratio = data.get('volume_ratio', 1)
+            price_momentum = data.get('price_momentum', 0)
+            
+            # Bollinger Bands approximation
+            bb_position = (rsi - 30) / 40  # normalized position in BB
+            
+            # ATR approximation (from volatility)
+            atr_estimate = abs(price_momentum) * volume_ratio
+            
+            # Stochastic approximation
+            stochastic = rsi  # simplified
+            
+            # EMA crossover signal
+            ema_signal = 1 if macd > 0 else -1
+            
+            # Volume strength
+            volume_strength = min(volume_ratio / 2.0, 2.0)  # normalized
+            
+            # Momentum strength
+            momentum_strength = abs(price_momentum) / 10.0
+            
+            return [
+                rsi,
+                macd,
+                volume_ratio,
+                price_momentum,
+                bb_position,
+                atr_estimate,
+                stochastic,
+                ema_signal,
+                volume_strength,
+                momentum_strength
+            ]
+        except:
+            return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0]
+    
+    def build_cnn_model(self, sequence_length, n_features):
+        """Build CNN model for chart pattern analysis"""
+        model = keras.Sequential([
+            layers.Input(shape=(sequence_length, n_features)),
+            layers.Conv1D(64, kernel_size=3, activation='relu', padding='same'),
+            layers.MaxPooling1D(pool_size=2),
+            layers.Conv1D(32, kernel_size=3, activation='relu', padding='same'),
+            layers.GlobalMaxPooling1D(),
+            layers.Dense(16, activation='relu'),
+            layers.Dropout(0.3),
+            layers.Dense(1, activation='sigmoid')
+        ])
+        
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        return model
+    
     def train_mtf_model(self, trades):
         """Train Multi-Timeframe Analyzer"""
         print("\n🎓 Training MTF Model...")
@@ -217,7 +275,7 @@ class DeepLearningTrainerV2:
     
     def train_ai_brain_model(self, trades):
         """Train AI Brain (الملك) - القرار النهائي"""
-        print("\n👑 Training AI Brain Model ...")
+        print("\n👑 Training AI Brain Model...")
         
         features_list = []
         labels_list = []
@@ -279,7 +337,7 @@ class DeepLearningTrainerV2:
         model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)  # epochs أكثر
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
-        print(f"👑 AI Brain Model: Accuracy {accuracy*100:.2f}% (الملك)")
+        print(f"👑 AI Brain Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
@@ -551,10 +609,54 @@ class DeepLearningTrainerV2:
         
         return model, accuracy
     
+    def train_chart_cnn_model(self, trades):
+        """Train Chart Pattern Analyzer (CNN)"""
+        print("\n📊 Training Chart CNN Model...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                # استخدام Feature Engineering المحسّن
+                features = self.calculate_enhanced_features(data)
+                
+                profit = float(trade.get('profit_percent', 0))
+                # CNN: كشف أنماط الشارت الناجحة
+                label = 1 if profit > 0.5 else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for Chart CNN")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        model = self.build_cnn_model(self.sequence_length, X.shape[2])
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"📊 Chart CNN Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
     def train_all_models(self):
-        """Train all 7 models (AI Brain + 6 Consultants)"""
+        """Train all 8 models (AI Brain + 7 Consultants: 6 LSTM + 1 CNN)"""
         print("\n" + "="*60)
-        print("👑 Starting Training - 7 LSTM Models")
+        print("👑 Starting Training - 8 Models (7 LSTM + 1 CNN)")
         print("="*60)
         
         trades = self.load_training_data()
@@ -614,13 +716,21 @@ class DeepLearningTrainerV2:
         except Exception as e:
             print(f"❌ Ranking training error: {e}")
         
+        # Train CNN model
+        try:
+            result = self.train_chart_cnn_model(trades)
+            if result:
+                self.models['chart_cnn'], results['chart_cnn_accuracy'] = result
+        except Exception as e:
+            print(f"❌ Chart CNN training error: {e}")
+        
         # Save models
         self.save_all_models()
         
         # Save to database
         self.save_models_to_db(results)
         
-        print("\n✅ All 7 models trained successfully!")
+        print("\n✅ All 8 models trained successfully!")
         return True
     
     def save_all_models(self):
