@@ -1,0 +1,651 @@
+"""
+🧠 Deep Learning Trainer V2 - 6 Specialized LSTM Models
+Trains 6 independent LSTM models for trading decisions
+"""
+
+# ========== LOAD ENV FILE ==========
+import os
+for _env_file in [
+    '/home/container/DeepLearningTrainer/.env',
+    '/home/container/.env',
+]:
+    try:
+        with open(_env_file) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith('#') and '=' in _line:
+                    _k, _v = _line.split('=', 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
+        break
+    except:
+        pass
+
+import sys
+import time
+import json
+from datetime import datetime, timedelta
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse, unquote
+
+try:
+    import numpy as np
+    import pandas as pd
+    os.environ['KERAS_BACKEND'] = 'jax'
+    import keras
+    from keras import layers
+    DL_AVAILABLE = True
+    print(f"✅ Keras {keras.__version__} with JAX backend loaded")
+except ImportError:
+    print("❌ Keras not installed. Run: pip install keras jax jaxlib")
+    DL_AVAILABLE = False
+    sys.exit(1)
+
+class DeepLearningTrainerV2:
+    def __init__(self, database_url):
+        self.database_url = database_url
+        self.conn = self._connect_db()
+        
+        # 6 موديلات منفصلة
+        self.models = {
+            'mtf': None,           # Multi-Timeframe
+            'risk': None,          # Risk Manager
+            'anomaly': None,       # Anomaly Detector
+            'exit': None,          # Exit Strategy
+            'pattern': None,       # Pattern Recognition
+            'ranking': None        # Coin Ranking
+        }
+        
+        self.sequence_length = 10
+        self.min_trades_for_training = 100
+        
+        print("🧠 Deep Learning Trainer V2 initialized (6 LSTM Models)")
+    
+    def _connect_db(self):
+        """Connect to PostgreSQL"""
+        try:
+            parsed = urlparse(self.database_url)
+            self._db_params = {
+                'host': parsed.hostname,
+                'port': parsed.port,
+                'database': parsed.path[1:],
+                'user': parsed.username,
+                'password': unquote(parsed.password)
+            }
+            conn = psycopg2.connect(**self._db_params)
+            print("✅ Database connected")
+            return conn
+        except Exception as e:
+            print(f"❌ Database connection error: {e}")
+            return None
+
+    def _get_conn(self):
+        """Get valid connection - reconnect if closed"""
+        try:
+            if self.conn.closed:
+                raise Exception("closed")
+            self.conn.cursor().execute("SELECT 1")
+        except Exception:
+            try:
+                self.conn = psycopg2.connect(**self._db_params)
+            except Exception as e:
+                print(f"❌ DB reconnect error: {e}")
+        return self.conn
+    
+    def load_training_data(self):
+        """Load historical trades for LSTM training"""
+        if not self.conn:
+            return None
+        
+        try:
+            cursor = self._get_conn().cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT 
+                    symbol,
+                    profit_percent,
+                    action,
+                    timestamp,
+                    data
+                FROM trades_history
+                WHERE action = 'SELL'
+                AND data IS NOT NULL
+                ORDER BY timestamp ASC
+                LIMIT 2000
+            """)
+            
+            trades = cursor.fetchall()
+            cursor.close()
+            
+            if len(trades) < self.min_trades_for_training:
+                print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
+                return None
+            
+            print(f"📊 Loaded {len(trades)} trades for training")
+            return trades
+        
+        except Exception as e:
+            print(f"❌ Error loading data: {e}")
+            return None
+    
+    def build_lstm_model(self, sequence_length, n_features, output_dim=1, model_type='binary'):
+        """Build LSTM model"""
+        model = keras.Sequential([
+            layers.Input(shape=(sequence_length, n_features)),
+            layers.LSTM(64, return_sequences=True),
+            layers.Dropout(0.3),
+            layers.LSTM(32, return_sequences=False),
+            layers.Dropout(0.2),
+            layers.Dense(16, activation='relu'),
+            layers.Dropout(0.2),
+        ])
+        
+        if model_type == 'binary':
+            model.add(layers.Dense(output_dim, activation='sigmoid'))
+            model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        elif model_type == 'regression':
+            model.add(layers.Dense(output_dim, activation='linear'))
+            model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+        elif model_type == 'multiclass':
+            model.add(layers.Dense(output_dim, activation='softmax'))
+            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        
+        return model
+    
+    def prepare_sequences(self, features_list, labels_list):
+        """تحويل البيانات لـ sequences"""
+        X_sequences = []
+        y_sequences = []
+        
+        for i in range(len(features_list) - self.sequence_length):
+            sequence = features_list[i:i + self.sequence_length]
+            label = labels_list[i + self.sequence_length]
+            
+            X_sequences.append(sequence)
+            y_sequences.append(label)
+        
+        return np.array(X_sequences, dtype=np.float32), np.array(y_sequences, dtype=np.float32)
+    
+    def train_mtf_model(self, trades):
+        """Train Multi-Timeframe Analyzer"""
+        print("\n🎓 Training MTF Model...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                features = [
+                    data.get('rsi', 50),
+                    data.get('macd', 0),
+                    data.get('volume_ratio', 1),
+                    data.get('price_momentum', 0)
+                ]
+                
+                profit = float(trade.get('profit_percent', 0))
+                # MTF: توقع الترند (bullish=1, bearish=0)
+                label = 1 if profit > 0 else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for MTF")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"✅ MTF Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
+    def train_risk_model(self, trades):
+        """Train Risk Manager"""
+        print("\n🎓 Training Risk Model...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                features = [
+                    data.get('rsi', 50),
+                    data.get('volume_ratio', 1),
+                    data.get('confidence', 60),
+                    data.get('price_momentum', 0)
+                ]
+                
+                profit = float(trade.get('profit_percent', 0))
+                # Risk: توقع مستوى المخاطرة (high_risk=1 if loss, low_risk=0)
+                label = 1 if profit < -1.0 else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for Risk")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"✅ Risk Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+
+    
+    def train_anomaly_model(self, trades):
+        """Train Anomaly Detector"""
+        print("\n🎓 Training Anomaly Model...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                features = [
+                    data.get('rsi', 50),
+                    data.get('macd', 0),
+                    data.get('volume_ratio', 1),
+                    data.get('price_momentum', 0)
+                ]
+                
+                profit = float(trade.get('profit_percent', 0))
+                # Anomaly: كشف الحالات الشاذة (خسارة كبيرة)
+                label = 1 if profit < -1.5 else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for Anomaly")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"✅ Anomaly Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
+    def train_exit_model(self, trades):
+        """Train Exit Strategy"""
+        print("\n🎓 Training Exit Model...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                features = [
+                    data.get('rsi', 50),
+                    data.get('macd', 0),
+                    data.get('confidence', 60),
+                    data.get('price_momentum', 0)
+                ]
+                
+                profit = float(trade.get('profit_percent', 0))
+                # Exit: متى نبيع؟ (sell_now=1 if profit>1 or loss<-1)
+                label = 1 if (profit > 1.0 or profit < -1.0) else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for Exit")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"✅ Exit Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
+    def train_pattern_model(self, trades):
+        """Train Pattern Recognition"""
+        print("\n🎓 Training Pattern Model...")
+        
+        features_list = []
+        labels_list = []
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                features = [
+                    data.get('rsi', 50),
+                    data.get('macd', 0),
+                    data.get('volume_ratio', 1),
+                    data.get('price_momentum', 0),
+                    data.get('confidence', 60)
+                ]
+                
+                profit = float(trade.get('profit_percent', 0))
+                # Pattern: نمط ناجح أو فخ
+                label = 1 if profit > 0.5 else 0
+                
+                features_list.append(features)
+                labels_list.append(label)
+            except:
+                continue
+        
+        X, y = self.prepare_sequences(features_list, labels_list)
+        
+        if len(X) < 50:
+            print("⚠️ Not enough data for Pattern")
+            return None
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"✅ Pattern Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
+    def train_ranking_model(self, trades):
+        """Train Coin Ranking"""
+        print("\n🎓 Training Ranking Model...")
+        
+        # تجميع البيانات حسب العملة
+        coin_data = {}
+        
+        for trade in trades:
+            try:
+                symbol = trade.get('symbol')
+                profit = float(trade.get('profit_percent', 0))
+                
+                if symbol not in coin_data:
+                    coin_data[symbol] = {'profits': [], 'count': 0}
+                
+                coin_data[symbol]['profits'].append(profit)
+                coin_data[symbol]['count'] += 1
+            except:
+                continue
+        
+        features_list = []
+        labels_list = []
+        
+        for symbol, data in coin_data.items():
+            if data['count'] < 3:
+                continue
+            
+            avg_profit = sum(data['profits']) / len(data['profits'])
+            win_rate = sum(1 for p in data['profits'] if p > 0) / len(data['profits'])
+            
+            features = [
+                avg_profit,
+                win_rate,
+                data['count'],
+                max(data['profits']),
+                min(data['profits'])
+            ]
+            
+            # Ranking: عملة جيدة أو سيئة
+            label = 1 if avg_profit > 0 and win_rate > 0.5 else 0
+            
+            features_list.append(features)
+            labels_list.append(label)
+        
+        if len(features_list) < 20:
+            print("⚠️ Not enough coins for Ranking")
+            return None
+        
+        # Ranking لا يحتاج sequences (بيانات ثابتة لكل عملة)
+        X = np.array(features_list, dtype=np.float32)
+        y = np.array(labels_list, dtype=np.float32)
+        
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        # موديل بسيط (بدون LSTM)
+        model = keras.Sequential([
+            layers.Input(shape=(5,)),
+            layers.Dense(32, activation='relu'),
+            layers.Dropout(0.3),
+            layers.Dense(16, activation='relu'),
+            layers.Dense(1, activation='sigmoid')
+        ])
+        
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        
+        model.fit(X_train, y_train, epochs=30, batch_size=16, validation_split=0.2, verbose=0)
+        
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        print(f"✅ Ranking Model: Accuracy {accuracy*100:.2f}%")
+        
+        return model, accuracy
+    
+    def train_all_models(self):
+        """Train all 6 models"""
+        print("\n" + "="*60)
+        print("🎓 Starting Training - 6 LSTM Models")
+        print("="*60)
+        
+        trades = self.load_training_data()
+        if not trades:
+            return False
+        
+        results = {}
+        
+        # Train each model
+        try:
+            result = self.train_mtf_model(trades)
+            if result:
+                self.models['mtf'], results['mtf_accuracy'] = result
+        except Exception as e:
+            print(f"❌ MTF training error: {e}")
+        
+        try:
+            result = self.train_risk_model(trades)
+            if result:
+                self.models['risk'], results['risk_accuracy'] = result
+        except Exception as e:
+            print(f"❌ Risk training error: {e}")
+        
+        try:
+            result = self.train_anomaly_model(trades)
+            if result:
+                self.models['anomaly'], results['anomaly_accuracy'] = result
+        except Exception as e:
+            print(f"❌ Anomaly training error: {e}")
+        
+        try:
+            result = self.train_exit_model(trades)
+            if result:
+                self.models['exit'], results['exit_accuracy'] = result
+        except Exception as e:
+            print(f"❌ Exit training error: {e}")
+        
+        try:
+            result = self.train_pattern_model(trades)
+            if result:
+                self.models['pattern'], results['pattern_accuracy'] = result
+        except Exception as e:
+            print(f"❌ Pattern training error: {e}")
+        
+        try:
+            result = self.train_ranking_model(trades)
+            if result:
+                self.models['ranking'], results['ranking_accuracy'] = result
+        except Exception as e:
+            print(f"❌ Ranking training error: {e}")
+        
+        # Save models
+        self.save_all_models()
+        
+        # Save to database
+        self.save_models_to_db(results)
+        
+        print("\n✅ All models trained successfully!")
+        return True
+    
+    def save_all_models(self):
+        """Save all models to files"""
+        print("\n💾 Saving models...")
+        
+        for model_name, model in self.models.items():
+            if model:
+                try:
+                    model_path = os.path.join(os.path.dirname(__file__), f'{model_name}_model.keras')
+                    model.save(model_path)
+                    print(f"  ✅ {model_name} saved")
+                except Exception as e:
+                    print(f"  ❌ {model_name} save error: {e}")
+    
+    def save_models_to_db(self, results):
+        """Save models info to database"""
+        if not self.conn:
+            return False
+        
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS dl_models_v2 (
+                    id SERIAL PRIMARY KEY,
+                    model_name VARCHAR(50) NOT NULL,
+                    model_type VARCHAR(50) NOT NULL,
+                    accuracy FLOAT,
+                    trained_at TIMESTAMP DEFAULT NOW(),
+                    status VARCHAR(20) DEFAULT 'active'
+                )
+            """)
+            
+            cursor.execute("DELETE FROM dl_models_v2")
+            
+            for model_name in self.models.keys():
+                accuracy_key = f'{model_name}_accuracy'
+                accuracy = results.get(accuracy_key, 0)
+                
+                cursor.execute("""
+                    INSERT INTO dl_models_v2 (model_name, model_type, accuracy)
+                    VALUES (%s, %s, %s)
+                """, (model_name, 'LSTM', float(accuracy)))
+            
+            conn.commit()
+            cursor.close()
+            
+            print("💾 Models info saved to database")
+            return True
+        
+        except Exception as e:
+            print(f"❌ Error saving to DB: {e}")
+            self._get_conn().rollback()
+            return False
+    
+    def run_continuous(self, interval_hours=12):
+        """Run training continuously"""
+        print(f"\n🚀 Deep Learning Trainer V2 started!")
+        print(f"⏰ Training interval: {interval_hours} hours")
+        print("="*60)
+        
+        while True:
+            try:
+                current_time = datetime.now().strftime("%H:%M:%S")
+                print(f"\n{'='*60}")
+                print(f"⏰ {current_time}")
+                print(f"{'='*60}")
+                
+                success = self.train_all_models()
+                
+                if success:
+                    print(f"\n✅ Training successful")
+                else:
+                    print(f"\n⚠️ Training skipped - not enough data")
+                
+                next_time = (datetime.now() + timedelta(hours=interval_hours)).strftime("%H:%M:%S")
+                print(f"\n⏰ Next training at: {next_time}")
+                time.sleep(interval_hours * 3600)
+            
+            except KeyboardInterrupt:
+                print("\n🛑 Trainer stopped by user")
+                break
+            except Exception as e:
+                print(f"❌ Error: {e}")
+                print(f"⏰ Retrying in 30 minutes...")
+                time.sleep(1800)
+
+def main():
+    if not DL_AVAILABLE:
+        print("❌ Please install Keras:")
+        print("   pip install keras jax jaxlib")
+        return
+    
+    database_url = os.getenv('DATABASE_URL')
+    if not database_url:
+        print("❌ DATABASE_URL not found!")
+        return
+    
+    trainer = DeepLearningTrainerV2(database_url)
+    trainer.run_continuous(interval_hours=12)
+
+if __name__ == "__main__":
+    main()
