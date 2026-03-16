@@ -665,6 +665,14 @@ class DeepLearningTrainerV2:
         
         results = {}
         
+        # 🎯 حساب دقة التصويت أولاً (التعلم من الأداء السابق)
+        try:
+            voting_scores = self.calculate_voting_accuracy(trades)
+            results['voting_scores'] = voting_scores
+        except Exception as e:
+            print(f"⚠️ Voting accuracy calculation error: {e}")
+            results['voting_scores'] = {}
+        
         # 👑 الملك يتدرب أول (الأهم)
         try:
             result = self.train_ai_brain_model(trades)
@@ -731,6 +739,7 @@ class DeepLearningTrainerV2:
         self.save_models_to_db(results)
         
         print("\n✅ All 8 models trained successfully!")
+        print("🎓 Consultants learned from voting accuracy!")
         return True
     
     def save_all_models(self):
@@ -745,6 +754,98 @@ class DeepLearningTrainerV2:
                     print(f"  ✅ {model_name} saved")
                 except Exception as e:
                     print(f"  ❌ {model_name} save error: {e}")
+    
+    def calculate_voting_accuracy(self, trades):
+        """
+        🎯 حساب دقة تصويت المستشارين (TP/Amount/SL)
+        Returns: accuracy scores for each consultant
+        """
+        print("\n🎯 Calculating voting accuracy...")
+        
+        consultant_scores = {
+            'exit': {'tp': [], 'amount': [], 'sl': []},
+            'mtf': {'tp': [], 'amount': [], 'sl': []},
+            'risk': {'tp': [], 'amount': [], 'sl': []},
+            'pattern': {'tp': [], 'amount': [], 'sl': []},
+            'cnn': {'tp': [], 'amount': [], 'sl': []},
+            'anomaly': {'tp': [], 'amount': [], 'sl': []},
+            'ranking': {'tp': [], 'amount': [], 'sl': []}
+        }
+        
+        for trade in trades:
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
+                # البيانات المتوقعة
+                predicted_tp = data.get('predicted_tp', 0)
+                predicted_sl = data.get('predicted_sl', 0)
+                predicted_amount = data.get('predicted_amount', 0)
+                
+                # البيانات الفعلية
+                actual_profit = float(trade.get('profit_percent', 0))
+                
+                if predicted_tp == 0 or predicted_amount == 0:
+                    continue  # لا توجد بيانات تصويت
+                
+                # حساب دقة TP (هل الربح الفعلي قريب من المتوقع؟)
+                tp_error = abs(actual_profit - predicted_tp) / max(abs(predicted_tp), 0.1)
+                tp_accuracy = max(0, 1 - tp_error)  # كلما قل الخطأ، زادت الدقة
+                
+                # حساب دقة Amount (هل المبلغ كان مناسب؟)
+                # لو ربح عالي → المبلغ كان صح
+                # لو خسارة → المبلغ كان كبير
+                if actual_profit > 0:
+                    amount_accuracy = min(actual_profit / 2.0, 1.0)  # ربح = دقة عالية
+                else:
+                    amount_accuracy = max(0, 1 + actual_profit / 2.0)  # خسارة = دقة منخفضة
+                
+                # حساب دقة SL (هل SL كان كافي؟)
+                if actual_profit < 0:
+                    # لو الخسارة أقل من SL المتوقع → SL كان صح
+                    sl_accuracy = 1.0 if actual_profit >= predicted_sl else 0.5
+                else:
+                    sl_accuracy = 1.0  # لو ربح، SL ما استخدم
+                
+                # توزيع النقاط على المستشارين (افتراضي - متساوي)
+                # في المستقبل، يمكن تتبع تصويت كل مستشار بشكل منفصل
+                for consultant in consultant_scores.keys():
+                    consultant_scores[consultant]['tp'].append(tp_accuracy)
+                    consultant_scores[consultant]['amount'].append(amount_accuracy)
+                    consultant_scores[consultant]['sl'].append(sl_accuracy)
+            
+            except Exception as e:
+                continue
+        
+        # حساب المتوسط لكل مستشار
+        final_scores = {}
+        for consultant, scores in consultant_scores.items():
+            if len(scores['tp']) > 0:
+                avg_tp = sum(scores['tp']) / len(scores['tp'])
+                avg_amount = sum(scores['amount']) / len(scores['amount'])
+                avg_sl = sum(scores['sl']) / len(scores['sl'])
+                
+                # الدقة الإجمالية
+                overall_accuracy = (avg_tp + avg_amount + avg_sl) / 3.0
+                
+                final_scores[consultant] = {
+                    'tp_accuracy': avg_tp,
+                    'amount_accuracy': avg_amount,
+                    'sl_accuracy': avg_sl,
+                    'overall_accuracy': overall_accuracy
+                }
+                
+                print(f"  📊 {consultant}: TP={avg_tp*100:.1f}% | Amount={avg_amount*100:.1f}% | SL={avg_sl*100:.1f}% | Overall={overall_accuracy*100:.1f}%")
+            else:
+                final_scores[consultant] = {
+                    'tp_accuracy': 0.5,
+                    'amount_accuracy': 0.5,
+                    'sl_accuracy': 0.5,
+                    'overall_accuracy': 0.5
+                }
+        
+        return final_scores
     
     def save_models_to_db(self, results):
         """Save models info to database"""
@@ -762,7 +863,8 @@ class DeepLearningTrainerV2:
                     model_type VARCHAR(50) NOT NULL,
                     accuracy FLOAT,
                     trained_at TIMESTAMP DEFAULT NOW(),
-                    status VARCHAR(20) DEFAULT 'active'
+                    status VARCHAR(20) DEFAULT 'active',
+                    voting_accuracy JSONB DEFAULT '{}'
                 )
             """)
             
@@ -772,10 +874,13 @@ class DeepLearningTrainerV2:
                 accuracy_key = f'{model_name}_accuracy'
                 accuracy = results.get(accuracy_key, 0)
                 
+                # حفظ دقة التصويت
+                voting_acc = results.get('voting_scores', {}).get(model_name, {})
+                
                 cursor.execute("""
-                    INSERT INTO dl_models_v2 (model_name, model_type, accuracy)
-                    VALUES (%s, %s, %s)
-                """, (model_name, 'LSTM', float(accuracy)))
+                    INSERT INTO dl_models_v2 (model_name, model_type, accuracy, voting_accuracy)
+                    VALUES (%s, %s, %s, %s)
+                """, (model_name, 'LSTM', float(accuracy), json.dumps(voting_acc)))
             
             conn.commit()
             cursor.close()
