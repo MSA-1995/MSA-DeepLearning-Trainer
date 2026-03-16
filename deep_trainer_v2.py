@@ -860,68 +860,78 @@ class DeepLearningTrainerV2:
         
         return final_scores
     
-    def save_models_to_db(self, results):
-        """Save models info to database"""
+    def save_models_to_db(self, results, retry=3):
+        """Save models info to database with retry on connection errors"""
         if not self.conn:
             return False
         
-        try:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
-            # زيادة timeout للعملية
-            cursor.execute("SET statement_timeout = '60s'")
-            
-            # محاولة إضافة العمود إذا لم يكن موجود (بدل DROP TABLE)
+        for attempt in range(retry):
             try:
-                cursor.execute("""
-                    ALTER TABLE dl_models_v2 
-                    ADD COLUMN IF NOT EXISTS voting_accuracy JSONB DEFAULT '{}'
-                """)
-            except Exception as alter_error:
-                # لو فشل ALTER، نعمل rollback ونعيد إنشاء الجدول
-                conn.rollback()
-                cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
-                cursor.execute("""
-                    CREATE TABLE dl_models_v2 (
-                        id SERIAL PRIMARY KEY,
-                        model_name VARCHAR(50) NOT NULL,
-                        model_type VARCHAR(50) NOT NULL,
-                        accuracy FLOAT,
-                        trained_at TIMESTAMP DEFAULT NOW(),
-                        status VARCHAR(20) DEFAULT 'active',
-                        voting_accuracy JSONB DEFAULT '{}'
-                    )
-                """)
-            
-            # حذف البيانات القديمة
-            cursor.execute("DELETE FROM dl_models_v2")
-            
-            for model_name in self.models.keys():
-                accuracy_key = f'{model_name}_accuracy'
-                accuracy = results.get(accuracy_key, 0)
+                # إعادة الاتصال لو انقطع
+                conn = self._get_conn()
+                cursor = conn.cursor()
                 
-                # حفظ دقة التصويت
-                voting_acc = results.get('voting_scores', {}).get(model_name, {})
+                # زيادة timeout للعملية
+                cursor.execute("SET statement_timeout = '60s'")
                 
-                cursor.execute("""
-                    INSERT INTO dl_models_v2 (model_name, model_type, accuracy, voting_accuracy)
-                    VALUES (%s, %s, %s, %s)
-                """, (model_name, 'LSTM', float(accuracy), json.dumps(voting_acc)))
+                # محاولة إضافة العمود إذا لم يكن موجود (بدل DROP TABLE)
+                try:
+                    cursor.execute("""
+                        ALTER TABLE dl_models_v2 
+                        ADD COLUMN IF NOT EXISTS voting_accuracy JSONB DEFAULT '{}'
+                    """)
+                except Exception as alter_error:
+                    # لو فشل ALTER، نعمل rollback ونعيد إنشاء الجدول
+                    conn.rollback()
+                    cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
+                    cursor.execute("""
+                        CREATE TABLE dl_models_v2 (
+                            id SERIAL PRIMARY KEY,
+                            model_name VARCHAR(50) NOT NULL,
+                            model_type VARCHAR(50) NOT NULL,
+                            accuracy FLOAT,
+                            trained_at TIMESTAMP DEFAULT NOW(),
+                            status VARCHAR(20) DEFAULT 'active',
+                            voting_accuracy JSONB DEFAULT '{}'
+                        )
+                    """)
+                
+                # حذف البيانات القديمة
+                cursor.execute("DELETE FROM dl_models_v2")
+                
+                for model_name in self.models.keys():
+                    accuracy_key = f'{model_name}_accuracy'
+                    accuracy = results.get(accuracy_key, 0)
+                    
+                    # حفظ دقة التصويت
+                    voting_acc = results.get('voting_scores', {}).get(model_name, {})
+                    
+                    cursor.execute("""
+                        INSERT INTO dl_models_v2 (model_name, model_type, accuracy, voting_accuracy)
+                        VALUES (%s, %s, %s, %s)
+                    """, (model_name, 'LSTM', float(accuracy), json.dumps(voting_acc)))
+                
+                conn.commit()
+                cursor.close()
+                
+                print("💾 Models info saved to database")
+                return True
             
-            conn.commit()
-            cursor.close()
-            
-            print("💾 Models info saved to database")
-            return True
+            except Exception as e:
+                print(f"❌ Error saving to DB (attempt {attempt+1}/{retry}): {e}")
+                try:
+                    self._get_conn().rollback()
+                except:
+                    pass
+                
+                # لو مو آخر محاولة، ننتظر شوي
+                if attempt < retry - 1:
+                    print(f"⏳ Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    return False
         
-        except Exception as e:
-            print(f"❌ Error saving to DB: {e}")
-            try:
-                self._get_conn().rollback()
-            except:
-                pass
-            return False
+        return False
     
     def run_continuous(self, interval_hours=12):
         """Run training continuously"""
