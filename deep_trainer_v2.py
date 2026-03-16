@@ -217,7 +217,7 @@ class DeepLearningTrainerV2:
     
     def train_ai_brain_model(self, trades):
         """Train AI Brain (الملك) - القرار النهائي"""
-        print("\n👑 Training AI Brain Model (الملك)...")
+        print("\n👑 Training AI Brain Model ...")
         
         features_list = []
         labels_list = []
