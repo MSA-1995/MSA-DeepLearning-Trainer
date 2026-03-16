@@ -832,7 +832,7 @@ def main():
         return
     
     trainer = DeepLearningTrainerV2(database_url)
-    trainer.run_continuous(interval_hours=12)
+    trainer.run_continuous(interval_hours=6)
 
 if __name__ == "__main__":
     main()
