@@ -235,7 +235,7 @@ class DeepLearningTrainer:
     def save_model(self):
         """Save model to file"""
         try:
-            model_path = os.path.join(os.path.dirname(__file__), 'deep_model.h5')
+            model_path = os.path.join(os.path.dirname(__file__), 'deep_model.keras')
             self.model.save(model_path)
             print(f"\n💾 Model saved to {model_path}")
             return True
@@ -246,7 +246,7 @@ class DeepLearningTrainer:
     def load_model(self):
         """Load model from file"""
         try:
-            model_path = os.path.join(os.path.dirname(__file__), 'deep_model.h5')
+            model_path = os.path.join(os.path.dirname(__file__), 'deep_model.keras')
             if os.path.exists(model_path):
                 self.model = keras.models.load_model(model_path)
                 print("✅ Model loaded")
