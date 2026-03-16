@@ -31,13 +31,14 @@ from urllib.parse import urlparse, unquote
 try:
     import numpy as np
     import pandas as pd
-    import tensorflow as tf
-    from tensorflow import keras
-    from tensorflow.keras import layers
+    import os
+    os.environ['KERAS_BACKEND'] = 'jax'
+    import keras
+    from keras import layers
     DL_AVAILABLE = True
-    print(f"✅ TensorFlow {tf.__version__} loaded")
+    print(f"✅ Keras {keras.__version__} with JAX backend loaded")
 except ImportError:
-    print("❌ TensorFlow not installed. Run: pip install tensorflow-cpu")
+    print("❌ Keras not installed. Run: pip install keras jax jaxlib")
     DL_AVAILABLE = False
     sys.exit(1)
 
