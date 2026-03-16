@@ -878,8 +878,9 @@ class DeepLearningTrainerV2:
                     ALTER TABLE dl_models_v2 
                     ADD COLUMN IF NOT EXISTS voting_accuracy JSONB DEFAULT '{}'
                 """)
-            except:
-                # لو الجدول مو موجود، ننشئه
+            except Exception as alter_error:
+                # لو فشل ALTER، نعمل rollback ونعيد إنشاء الجدول
+                conn.rollback()
                 cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
                 cursor.execute("""
                     CREATE TABLE dl_models_v2 (
@@ -916,7 +917,10 @@ class DeepLearningTrainerV2:
         
         except Exception as e:
             print(f"❌ Error saving to DB: {e}")
-            self._get_conn().rollback()
+            try:
+                self._get_conn().rollback()
+            except:
+                pass
             return False
     
     def run_continuous(self, interval_hours=12):
