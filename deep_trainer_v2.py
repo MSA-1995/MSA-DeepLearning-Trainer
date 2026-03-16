@@ -3,6 +3,20 @@
 Trains AI Brain + 7 Consultant Models for trading decisions
 """
 
+# ========== AUTO-UPDATE PIP ==========
+import subprocess
+import sys
+try:
+    print("🔄 Checking pip updates...")
+    result = subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'], 
+                           capture_output=True, check=False, timeout=30, text=True)
+    if "Successfully installed" in result.stdout:
+        print("✅ pip updated successfully")
+    else:
+        print("✅ pip is up to date")
+except Exception as e:
+    print(f"⚠️ pip update skipped: {e}")
+
 # ========== LOAD ENV FILE ==========
 import os
 for _env_file in [
@@ -20,7 +34,6 @@ for _env_file in [
     except:
         pass
 
-import sys
 import time
 import json
 from datetime import datetime, timedelta
@@ -856,18 +869,31 @@ class DeepLearningTrainerV2:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS dl_models_v2 (
-                    id SERIAL PRIMARY KEY,
-                    model_name VARCHAR(50) NOT NULL,
-                    model_type VARCHAR(50) NOT NULL,
-                    accuracy FLOAT,
-                    trained_at TIMESTAMP DEFAULT NOW(),
-                    status VARCHAR(20) DEFAULT 'active',
-                    voting_accuracy JSONB DEFAULT '{}'
-                )
-            """)
+            # زيادة timeout للعملية
+            cursor.execute("SET statement_timeout = '60s'")
             
+            # محاولة إضافة العمود إذا لم يكن موجود (بدل DROP TABLE)
+            try:
+                cursor.execute("""
+                    ALTER TABLE dl_models_v2 
+                    ADD COLUMN IF NOT EXISTS voting_accuracy JSONB DEFAULT '{}'
+                """)
+            except:
+                # لو الجدول مو موجود، ننشئه
+                cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
+                cursor.execute("""
+                    CREATE TABLE dl_models_v2 (
+                        id SERIAL PRIMARY KEY,
+                        model_name VARCHAR(50) NOT NULL,
+                        model_type VARCHAR(50) NOT NULL,
+                        accuracy FLOAT,
+                        trained_at TIMESTAMP DEFAULT NOW(),
+                        status VARCHAR(20) DEFAULT 'active',
+                        voting_accuracy JSONB DEFAULT '{}'
+                    )
+                """)
+            
+            # حذف البيانات القديمة
             cursor.execute("DELETE FROM dl_models_v2")
             
             for model_name in self.models.keys():
