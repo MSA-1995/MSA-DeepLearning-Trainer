@@ -790,7 +790,7 @@ class DeepLearningTrainerV2:
     
     def run_continuous(self, interval_hours=12):
         """Run training continuously"""
-        print(f"\n🚀 Deep Learning Trainer V2 started!")
+        print(f"\n🚀 Deep Learning Trainer V3 started!")
         print(f"⏰ Training interval: {interval_hours} hours")
         print("="*60)
         
