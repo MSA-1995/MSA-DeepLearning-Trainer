@@ -88,7 +88,7 @@ class DeepLearningTrainerV2:
                 'password': unquote(parsed.password)
             }
             conn = psycopg2.connect(**self._db_params)
-            print("✅ Database connected")
+            print("✅ Database: Connected (Supabase)")
             return conn
         except Exception as e:
             print(f"❌ Database connection error: {e}")
