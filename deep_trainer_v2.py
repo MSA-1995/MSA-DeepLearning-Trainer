@@ -871,45 +871,34 @@ class DeepLearningTrainerV2:
                 conn = self._get_conn()
                 cursor = conn.cursor()
                 
-                # زيادة timeout للعملية
-                cursor.execute("SET statement_timeout = '60s'")
+                # إنشاء الجدول لو مو موجود (عملية سريعة)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS dl_models_v2 (
+                        id SERIAL PRIMARY KEY,
+                        model_name VARCHAR(50) NOT NULL,
+                        model_type VARCHAR(50) NOT NULL,
+                        accuracy FLOAT,
+                        trained_at TIMESTAMP DEFAULT NOW(),
+                        status VARCHAR(20) DEFAULT 'active',
+                        voting_accuracy JSONB DEFAULT '{}'
+                    )
+                """)
                 
-                # محاولة إضافة العمود إذا لم يكن موجود (بدل DROP TABLE)
-                try:
-                    cursor.execute("""
-                        ALTER TABLE dl_models_v2 
-                        ADD COLUMN IF NOT EXISTS voting_accuracy JSONB DEFAULT '{}'
-                    """)
-                except Exception as alter_error:
-                    # لو فشل ALTER، نعمل rollback ونعيد إنشاء الجدول
-                    conn.rollback()
-                    cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
-                    cursor.execute("""
-                        CREATE TABLE dl_models_v2 (
-                            id SERIAL PRIMARY KEY,
-                            model_name VARCHAR(50) NOT NULL,
-                            model_type VARCHAR(50) NOT NULL,
-                            accuracy FLOAT,
-                            trained_at TIMESTAMP DEFAULT NOW(),
-                            status VARCHAR(20) DEFAULT 'active',
-                            voting_accuracy JSONB DEFAULT '{}'
-                        )
-                    """)
+                # حذف البيانات القديمة بـ TRUNCATE (أسرع من DELETE)
+                cursor.execute("TRUNCATE TABLE dl_models_v2 RESTART IDENTITY")
                 
-                # حذف البيانات القديمة
-                cursor.execute("DELETE FROM dl_models_v2")
-                
+                # إدراج البيانات الجديدة (دفعة واحدة)
+                values = []
                 for model_name in self.models.keys():
                     accuracy_key = f'{model_name}_accuracy'
                     accuracy = results.get(accuracy_key, 0)
-                    
-                    # حفظ دقة التصويت
                     voting_acc = results.get('voting_scores', {}).get(model_name, {})
-                    
-                    cursor.execute("""
-                        INSERT INTO dl_models_v2 (model_name, model_type, accuracy, voting_accuracy)
-                        VALUES (%s, %s, %s, %s)
-                    """, (model_name, 'LSTM', float(accuracy), json.dumps(voting_acc)))
+                    values.append((model_name, 'LSTM', float(accuracy), json.dumps(voting_acc)))
+                
+                cursor.executemany("""
+                    INSERT INTO dl_models_v2 (model_name, model_type, accuracy, voting_accuracy)
+                    VALUES (%s, %s, %s, %s)
+                """, values)
                 
                 conn.commit()
                 cursor.close()
