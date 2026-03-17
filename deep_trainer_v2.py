@@ -41,6 +41,7 @@ from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse, unquote
+import requests
 
 try:
     import numpy as np
@@ -54,6 +55,82 @@ except ImportError:
     print("❌ LightGBM not installed. Run: pip install lightgbm scikit-learn")
     ML_AVAILABLE = False
     sys.exit(1)
+
+# ========== CRITICAL ALERTS WEBHOOK ==========
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
+import base64
+
+ENCRYPTED_CRITICAL_WEBHOOK = "gAAAAABpuay0FYK_AXFBy_trEWffy5Ho8xzGr4-zSrASVWnVqipfKR3_k6C9VsucFp1qPEzcHaXDb8txhiVUkFrXFKTD9XIguwTnCZcpj6FqnGTKi7-jaCDb3eHEdeNiZcmKpax4ma_WNrlRHLJDTVDSuWvtff41bmMLyohJ3_ezK3Ox0-8iHeVDnutL1oyU7sMHwWfWY4f12xvc--03MTYqu42u_0IfNbEvyCt2LGvDNlVIJcCkQeg="
+
+def get_encryption_key():
+    """Get encryption key from environment"""
+    encrypted_key = os.getenv('ENCRYPTION_KEY')
+    if not encrypted_key:
+        for env_file in ['/home/container/DeepLearningTrainer_XGBoost/.env', '/home/container/.env']:
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        if line.startswith('ENCRYPTION_KEY='):
+                            encrypted_key = line.strip().split('=', 1)[1]
+                            break
+                if encrypted_key:
+                    break
+            except:
+                pass
+    return encrypted_key
+
+def get_critical_webhook():
+    """Decrypt critical webhook"""
+    try:
+        _KEY = get_encryption_key()
+        if not _KEY:
+            return None
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b'binance_bot_salt_2026',
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(_KEY.encode()))
+        fernet = Fernet(key)
+        webhook = fernet.decrypt(ENCRYPTED_CRITICAL_WEBHOOK.encode()).decode()
+        return webhook
+    except:
+        return None
+
+CRITICAL_WEBHOOK = get_critical_webhook()
+
+def send_critical_alert(error_type, message, details=None):
+    """Send critical error alert to Discord"""
+    if not CRITICAL_WEBHOOK:
+        return
+    
+    fields = [
+        {"name": "Bot", "value": "Training Bot", "inline": True},
+        {"name": "Error Type", "value": error_type, "inline": True},
+        {"name": "Timestamp", "value": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "inline": True},
+        {"name": "Message", "value": message, "inline": False}
+    ]
+    
+    if details:
+        fields.append({"name": "Details", "value": str(details)[:1000], "inline": False})
+    
+    embed = {
+        "title": "🚨 CRITICAL ALERT",
+        "color": 0xff0000,
+        "fields": fields,
+        "footer": {"text": "MSA Training Bot • System Alerts"},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        requests.post(CRITICAL_WEBHOOK, json={"embeds": [embed]}, timeout=5)
+    except:
+        pass
 
 class DeepLearningTrainerXGBoost:
     def __init__(self, database_url):
@@ -94,6 +171,7 @@ class DeepLearningTrainerXGBoost:
             return conn
         except Exception as e:
             print(f"❌ Database connection error: {e}")
+            send_critical_alert("Database Connection", "Failed to connect to database", str(e))
             return None
 
     def _get_conn(self):
@@ -823,6 +901,7 @@ class DeepLearningTrainerXGBoost:
                 self.models['ai_brain'], results['ai_brain_accuracy'] = result
         except Exception as e:
             print(f"❌ AI Brain training error: {e}")
+            send_critical_alert("Model Training Error", "AI Brain model failed to train", str(e))
         
         # Train consultant models
         try:
@@ -1053,6 +1132,7 @@ class DeepLearningTrainerXGBoost:
                 break
             except Exception as e:
                 print(f"❌ Error: {e}")
+                send_critical_alert("Training Loop Error", "Training loop encountered an error", str(e))
                 print(f"⏰ Retrying in 30 minutes...")
                 time.sleep(1800)
 
