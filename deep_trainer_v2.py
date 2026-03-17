@@ -34,6 +34,29 @@ except ImportError:
         print("⚠️ Critical alerts will not work")
         requests = None
 
+# ========== AUTO-INSTALL CRYPTOGRAPHY ==========
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.backends import default_backend
+    print("✅ cryptography module loaded")
+except ImportError:
+    print("📦 Installing cryptography...")
+    result = subprocess.run([sys.executable, '-m', 'pip', 'install', 'cryptography'], 
+                   capture_output=True, check=False, timeout=60, text=True)
+    print(f"Installation output: {result.stdout}")
+    try:
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.backends import default_backend
+        print("✅ cryptography installed successfully")
+    except Exception as e:
+        print(f"❌ Failed to install cryptography: {e}")
+        print("⚠️ Critical alerts will not work")
+        Fernet = None
+
 # ========== LOAD ENV FILE ==========
 import os
 for _env_file in [
@@ -73,10 +96,6 @@ except ImportError:
     sys.exit(1)
 
 # ========== CRITICAL ALERTS WEBHOOK ==========
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.backends import default_backend
 import base64
 
 ENCRYPTED_CRITICAL_WEBHOOK = "gAAAAABpuay0FYK_AXFBy_trEWffy5Ho8xzGr4-zSrASVWnVqipfKR3_k6C9VsucFp1qPEzcHaXDb8txhiVUkFrXFKTD9XIguwTnCZcpj6FqnGTKi7-jaCDb3eHEdeNiZcmKpax4ma_WNrlRHLJDTVDSuWvtff41bmMLyohJ3_ezK3Ox0-8iHeVDnutL1oyU7sMHwWfWY4f12xvc--03MTYqu42u_0IfNbEvyCt2LGvDNlVIJcCkQeg="
@@ -100,6 +119,8 @@ def get_encryption_key():
 
 def get_critical_webhook():
     """Decrypt critical webhook"""
+    if not Fernet:
+        return None
     try:
         _KEY = get_encryption_key()
         if not _KEY:
