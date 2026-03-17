@@ -85,7 +85,9 @@ class DeepLearningTrainerV2:
                 'port': parsed.port,
                 'database': parsed.path[1:],
                 'user': parsed.username,
-                'password': unquote(parsed.password)
+                'password': unquote(parsed.password),
+                'sslmode': 'require',
+                'connect_timeout': 10
             }
             conn = psycopg2.connect(**self._db_params)
             print("✅ Database: Connected (Supabase)")
@@ -279,7 +281,7 @@ class DeepLearningTrainerV2:
         
         model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
         
-        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ MTF Model: Accuracy {accuracy*100:.2f}%")
@@ -347,7 +349,7 @@ class DeepLearningTrainerV2:
         
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)  # epochs أكثر
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"👑 AI Brain Model: Accuracy {accuracy*100:.2f}%")
@@ -395,7 +397,7 @@ class DeepLearningTrainerV2:
         
         model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
         
-        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ Risk Model: Accuracy {accuracy*100:.2f}%")
@@ -444,7 +446,7 @@ class DeepLearningTrainerV2:
         
         model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
         
-        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ Anomaly Model: Accuracy {accuracy*100:.2f}%")
@@ -492,7 +494,7 @@ class DeepLearningTrainerV2:
         
         model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
         
-        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ Exit Model: Accuracy {accuracy*100:.2f}%")
@@ -541,7 +543,7 @@ class DeepLearningTrainerV2:
         
         model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
         
-        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ Pattern Model: Accuracy {accuracy*100:.2f}%")
@@ -615,7 +617,7 @@ class DeepLearningTrainerV2:
         
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
         
-        model.fit(X_train, y_train, epochs=30, batch_size=16, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=16, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ Ranking Model: Accuracy {accuracy*100:.2f}%")
@@ -659,7 +661,7 @@ class DeepLearningTrainerV2:
         
         model = self.build_cnn_model(self.sequence_length, X.shape[2])
         
-        model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
         
         loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"📊 Chart CNN Model: Accuracy {accuracy*100:.2f}%")
@@ -770,108 +772,97 @@ class DeepLearningTrainerV2:
     
     def calculate_voting_accuracy(self, trades):
         """
-        🎯 حساب دقة تصويت المستشارين (TP/Amount/SL)
+        🎯 حساب دقة تصويت المستشارين من جدول consultant_votes
         Returns: accuracy scores for each consultant
         """
-        print("\n🎯 Calculating voting accuracy...")
+        print("\n🎯 Calculating voting accuracy from database...")
         
-        consultant_scores = {
-            'exit': {'tp': [], 'amount': [], 'sl': []},
-            'mtf': {'tp': [], 'amount': [], 'sl': []},
-            'risk': {'tp': [], 'amount': [], 'sl': []},
-            'pattern': {'tp': [], 'amount': [], 'sl': []},
-            'cnn': {'tp': [], 'amount': [], 'sl': []},
-            'anomaly': {'tp': [], 'amount': [], 'sl': []},
-            'ranking': {'tp': [], 'amount': [], 'sl': []}
-        }
-        
-        for trade in trades:
-            try:
-                data = trade.get('data', {})
-                if isinstance(data, str):
-                    data = json.loads(data)
-                
-                # البيانات المتوقعة
-                predicted_tp = data.get('predicted_tp', 0)
-                predicted_sl = data.get('predicted_sl', 0)
-                predicted_amount = data.get('predicted_amount', 0)
-                
-                # البيانات الفعلية
-                actual_profit = float(trade.get('profit_percent', 0))
-                
-                if predicted_tp == 0 or predicted_amount == 0:
-                    continue  # لا توجد بيانات تصويت
-                
-                # حساب دقة TP (هل الربح الفعلي قريب من المتوقع؟)
-                tp_error = abs(actual_profit - predicted_tp) / max(abs(predicted_tp), 0.1)
-                tp_accuracy = max(0, 1 - tp_error)  # كلما قل الخطأ، زادت الدقة
-                
-                # حساب دقة Amount (هل المبلغ كان مناسب؟)
-                # لو ربح عالي → المبلغ كان صح
-                # لو خسارة → المبلغ كان كبير
-                if actual_profit > 0:
-                    amount_accuracy = min(actual_profit / 2.0, 1.0)  # ربح = دقة عالية
-                else:
-                    amount_accuracy = max(0, 1 + actual_profit / 2.0)  # خسارة = دقة منخفضة
-                
-                # حساب دقة SL (هل SL كان كافي؟)
-                if actual_profit < 0:
-                    # لو الخسارة أقل من SL المتوقع → SL كان صح
-                    sl_accuracy = 1.0 if actual_profit >= predicted_sl else 0.5
-                else:
-                    sl_accuracy = 1.0  # لو ربح، SL ما استخدم
-                
-                # توزيع النقاط على المستشارين (افتراضي - متساوي)
-                # في المستقبل، يمكن تتبع تصويت كل مستشار بشكل منفصل
-                for consultant in consultant_scores.keys():
-                    consultant_scores[consultant]['tp'].append(tp_accuracy)
-                    consultant_scores[consultant]['amount'].append(amount_accuracy)
-                    consultant_scores[consultant]['sl'].append(sl_accuracy)
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
             
-            except Exception as e:
-                continue
-        
-        # حساب المتوسط لكل مستشار
-        final_scores = {}
-        for consultant, scores in consultant_scores.items():
-            if len(scores['tp']) > 0:
-                avg_tp = sum(scores['tp']) / len(scores['tp'])
-                avg_amount = sum(scores['amount']) / len(scores['amount'])
-                avg_sl = sum(scores['sl']) / len(scores['sl'])
+            # قراءة نتائج التصويت من الجدول
+            cursor.execute("""
+                SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
+                FROM consultant_votes
+                WHERE timestamp > NOW() - INTERVAL '30 days'
+                GROUP BY consultant_name, vote_type, is_correct
+            """)
+            
+            results = cursor.fetchall()
+            cursor.close()
+            
+            # حساب الدقة لكل مستشار
+            consultant_scores = {}
+            
+            for row in results:
+                consultant_name = row[0]
+                vote_type = row[1]
+                is_correct = row[2]
+                count = row[3]
                 
-                # الدقة الإجمالية
-                overall_accuracy = (avg_tp + avg_amount + avg_sl) / 3.0
+                if consultant_name not in consultant_scores:
+                    consultant_scores[consultant_name] = {
+                        'tp_correct': 0, 'tp_wrong': 0,
+                        'amount_correct': 0, 'amount_wrong': 0,
+                        'sl_correct': 0, 'sl_wrong': 0,
+                        'sell_correct': 0, 'sell_wrong': 0
+                    }
+                
+                key = f"{vote_type}_{'correct' if is_correct else 'wrong'}"
+                consultant_scores[consultant_name][key] = count
+            
+            # حساب النسب المئوية
+            final_scores = {}
+            for consultant, scores in consultant_scores.items():
+                tp_total = scores['tp_correct'] + scores['tp_wrong']
+                amount_total = scores['amount_correct'] + scores['amount_wrong']
+                sl_total = scores['sl_correct'] + scores['sl_wrong']
+                sell_total = scores['sell_correct'] + scores['sell_wrong']
                 
                 final_scores[consultant] = {
-                    'tp_accuracy': avg_tp,
-                    'amount_accuracy': avg_amount,
-                    'sl_accuracy': avg_sl,
-                    'overall_accuracy': overall_accuracy
+                    'tp_accuracy': scores['tp_correct'] / tp_total if tp_total > 0 else 0.5,
+                    'amount_accuracy': scores['amount_correct'] / amount_total if amount_total > 0 else 0.5,
+                    'sl_accuracy': scores['sl_correct'] / sl_total if sl_total > 0 else 0.5,
+                    'sell_accuracy': scores['sell_correct'] / sell_total if sell_total > 0 else 0.5,
+                    'overall_accuracy': (
+                        (scores['tp_correct'] + scores['amount_correct'] + scores['sl_correct'] + scores['sell_correct']) /
+                        max(tp_total + amount_total + sl_total + sell_total, 1)
+                    )
                 }
-                
-                print(f"  📊 {consultant}: TP={avg_tp*100:.1f}% | Amount={avg_amount*100:.1f}% | SL={avg_sl*100:.1f}% | Overall={overall_accuracy*100:.1f}%")
-            else:
-                final_scores[consultant] = {
-                    'tp_accuracy': 0.5,
-                    'amount_accuracy': 0.5,
-                    'sl_accuracy': 0.5,
-                    'overall_accuracy': 0.5
-                }
+            
+            print(f"✅ Loaded voting accuracy for {len(final_scores)} consultants")
+            return final_scores
         
+        except Exception as e:
+            print(f"⚠️ Error calculating voting accuracy: {e}")
+            # Fallback: دقة افتراضية
+            return {
+                'exit': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'mtf': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'risk': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'pattern': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'cnn': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'anomaly': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'ranking': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5}
+            }
+
         return final_scores
     
     def save_models_to_db(self, results, retry=3):
-        """Save models info to database with retry on connection errors"""
+        """Save models info to database (simple - no voting_accuracy column needed)"""
         if not self.conn:
+            print("⚠️ No database connection - models saved to files only")
             return False
         
         for attempt in range(retry):
             try:
-                # إعادة الاتصال لو انقطع
+                print(f"🔄 Attempt {attempt+1}/{retry}: Connecting to database...")
                 conn = self._get_conn()
                 cursor = conn.cursor()
                 
-                # إنشاء الجدول لو مو موجود (عملية سريعة)
+                print("📋 Checking table...")
+                # Create table if not exists (no voting_accuracy column)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS dl_models_v2 (
                         id SERIAL PRIMARY KEY,
@@ -879,46 +870,40 @@ class DeepLearningTrainerV2:
                         model_type VARCHAR(50) NOT NULL,
                         accuracy FLOAT,
                         trained_at TIMESTAMP DEFAULT NOW(),
-                        status VARCHAR(20) DEFAULT 'active',
-                        voting_accuracy JSONB DEFAULT '{}'
+                        status VARCHAR(20) DEFAULT 'active'
                     )
                 """)
+                conn.commit()
                 
-                # حذف البيانات القديمة بـ TRUNCATE (أسرع من DELETE)
-                cursor.execute("TRUNCATE TABLE dl_models_v2 RESTART IDENTITY")
+                print("🗑️ Deleting old data...")
+                # Delete old data (faster than DROP)
+                cursor.execute("DELETE FROM dl_models_v2")
+                conn.commit()
                 
-                # إدراج البيانات الجديدة (دفعة واحدة)
-                values = []
+                print("💾 Inserting new data...")
                 for model_name in self.models.keys():
                     accuracy_key = f'{model_name}_accuracy'
                     accuracy = results.get(accuracy_key, 0)
-                    voting_acc = results.get('voting_scores', {}).get(model_name, {})
-                    values.append((model_name, 'LSTM', float(accuracy), json.dumps(voting_acc)))
-                
-                cursor.executemany("""
-                    INSERT INTO dl_models_v2 (model_name, model_type, accuracy, voting_accuracy)
-                    VALUES (%s, %s, %s, %s)
-                """, values)
+                    
+                    cursor.execute("""
+                        INSERT INTO dl_models_v2 (model_name, model_type, accuracy)
+                        VALUES (%s, %s, %s)
+                    """, (model_name, 'LSTM', float(accuracy)))
                 
                 conn.commit()
                 cursor.close()
                 
-                print("💾 Models info saved to database")
+                print("✅ Models info saved to database")
                 return True
             
             except Exception as e:
-                print(f"❌ Error saving to DB (attempt {attempt+1}/{retry}): {e}")
                 try:
-                    self._get_conn().rollback()
+                    conn.rollback()
                 except:
                     pass
                 
-                # لو مو آخر محاولة، ننتظر شوي
                 if attempt < retry - 1:
-                    print(f"⏳ Retrying in 5 seconds...")
-                    time.sleep(5)
-                else:
-                    return False
+                    time.sleep(2)
         
         return False
     
