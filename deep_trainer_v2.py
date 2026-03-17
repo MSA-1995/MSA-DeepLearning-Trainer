@@ -211,9 +211,15 @@ class DeepLearningTrainerXGBoost:
             return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0]
 
     
-    def train_smart_money_model(self, trades):
+    def train_smart_money_model(self, trades, voting_scores=None):
         """Train Smart Money Tracker (بديل MTF)"""
         print("\n🐋 Training Smart Money Model (LightGBM)...")
+        
+        # Default voting scores if not provided
+        if voting_scores is None:
+            voting_scores = {'smart_money': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        smart_money_scores = voting_scores.get('smart_money', {})
         
         features_list = []
         labels_list = []
@@ -233,7 +239,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('ema_crossover', 0),
                     data.get('bid_ask_spread', 0),
                     data.get('volume_trend', 0),
-                    data.get('price_change_1h', 0)
+                    data.get('price_change_1h', 0),
+                    # Voting accuracy features
+                    smart_money_scores.get('tp_accuracy', 0.5),
+                    smart_money_scores.get('amount_accuracy', 0.5),
+                    smart_money_scores.get('sl_accuracy', 0.5),
+                    smart_money_scores.get('sell_accuracy', 0.5)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -270,9 +281,15 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_ai_brain_model(self, trades):
+    def train_ai_brain_model(self, trades, voting_scores=None):
         """Train AI Brain (الملك) - القرار النهائي"""
         print("\n👑 Training AI Brain Model (LightGBM)...")
+        
+        # Default voting scores if not provided
+        if voting_scores is None:
+            voting_scores = {'ai_brain': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        ai_brain_scores = voting_scores.get('ai_brain', {})
         
         features_list = []
         labels_list = []
@@ -299,7 +316,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('ema_crossover', 0),
                     data.get('bid_ask_spread', 0),
                     data.get('volume_trend', 0),
-                    data.get('price_change_1h', 0)
+                    data.get('price_change_1h', 0),
+                    # Voting accuracy features
+                    ai_brain_scores.get('tp_accuracy', 0.5),
+                    ai_brain_scores.get('amount_accuracy', 0.5),
+                    ai_brain_scores.get('sl_accuracy', 0.5),
+                    ai_brain_scores.get('sell_accuracy', 0.5)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -337,9 +359,14 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_risk_model(self, trades):
+    def train_risk_model(self, trades, voting_scores=None):
         """Train Risk Manager"""
         print("\n🎓 Training Risk Model (LightGBM)...")
+        
+        if voting_scores is None:
+            voting_scores = {'risk': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        risk_scores = voting_scores.get('risk', {})
         
         features_list = []
         labels_list = []
@@ -359,7 +386,11 @@ class DeepLearningTrainerXGBoost:
                     data.get('ema_crossover', 0),
                     data.get('bid_ask_spread', 0),
                     data.get('volume_trend', 0),
-                    data.get('price_change_1h', 0)
+                    data.get('price_change_1h', 0),
+                    risk_scores.get('tp_accuracy', 0.5),
+                    risk_scores.get('amount_accuracy', 0.5),
+                    risk_scores.get('sl_accuracy', 0.5),
+                    risk_scores.get('sell_accuracy', 0.5)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -396,9 +427,14 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_anomaly_model(self, trades):
+    def train_anomaly_model(self, trades, voting_scores=None):
         """Train Anomaly Detector"""
         print("\n🎓 Training Anomaly Model (LightGBM)...")
+        
+        if voting_scores is None:
+            voting_scores = {'anomaly': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        anomaly_scores = voting_scores.get('anomaly', {})
         
         features_list = []
         labels_list = []
@@ -418,7 +454,11 @@ class DeepLearningTrainerXGBoost:
                     data.get('ema_crossover', 0),
                     data.get('bid_ask_spread', 0),
                     data.get('volume_trend', 0),
-                    data.get('price_change_1h', 0)
+                    data.get('price_change_1h', 0),
+                    anomaly_scores.get('tp_accuracy', 0.5),
+                    anomaly_scores.get('amount_accuracy', 0.5),
+                    anomaly_scores.get('sl_accuracy', 0.5),
+                    anomaly_scores.get('sell_accuracy', 0.5)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -455,9 +495,14 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_exit_model(self, trades):
+    def train_exit_model(self, trades, voting_scores=None):
         """Train Exit Strategy"""
         print("\n🎓 Training Exit Model (LightGBM)...")
+        
+        if voting_scores is None:
+            voting_scores = {'exit': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        exit_scores = voting_scores.get('exit', {})
         
         features_list = []
         labels_list = []
@@ -477,7 +522,11 @@ class DeepLearningTrainerXGBoost:
                     data.get('ema_crossover', 0),
                     data.get('bid_ask_spread', 0),
                     data.get('volume_trend', 0),
-                    data.get('price_change_1h', 0)
+                    data.get('price_change_1h', 0),
+                    exit_scores.get('tp_accuracy', 0.5),
+                    exit_scores.get('amount_accuracy', 0.5),
+                    exit_scores.get('sl_accuracy', 0.5),
+                    exit_scores.get('sell_accuracy', 0.5)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -514,9 +563,14 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_pattern_model(self, trades):
+    def train_pattern_model(self, trades, voting_scores=None):
         """Train Pattern Recognition"""
         print("\n🎓 Training Pattern Model (LightGBM)...")
+        
+        if voting_scores is None:
+            voting_scores = {'pattern': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        pattern_scores = voting_scores.get('pattern', {})
         
         features_list = []
         labels_list = []
@@ -537,7 +591,11 @@ class DeepLearningTrainerXGBoost:
                     data.get('ema_crossover', 0),
                     data.get('bid_ask_spread', 0),
                     data.get('volume_trend', 0),
-                    data.get('price_change_1h', 0)
+                    data.get('price_change_1h', 0),
+                    pattern_scores.get('tp_accuracy', 0.5),
+                    pattern_scores.get('amount_accuracy', 0.5),
+                    pattern_scores.get('sl_accuracy', 0.5),
+                    pattern_scores.get('sell_accuracy', 0.5)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -574,9 +632,14 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_liquidity_model(self, trades):
+    def train_liquidity_model(self, trades, voting_scores=None):
         """Train Liquidity Analyzer (بديل Ranking)"""
         print("\n💧 Training Liquidity Model (LightGBM)...")
+        
+        if voting_scores is None:
+            voting_scores = {'liquidity': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        liquidity_scores = voting_scores.get('liquidity', {})
         
         coin_data = {}
         
@@ -608,7 +671,11 @@ class DeepLearningTrainerXGBoost:
                 win_rate,
                 data['count'],
                 max(data['profits']),
-                min(data['profits'])
+                min(data['profits']),
+                liquidity_scores.get('tp_accuracy', 0.5),
+                liquidity_scores.get('amount_accuracy', 0.5),
+                liquidity_scores.get('sl_accuracy', 0.5),
+                liquidity_scores.get('sell_accuracy', 0.5)
             ]
             
             label = 1 if avg_profit > 0 and win_rate > 0.5 else 0
@@ -642,9 +709,14 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_chart_cnn_model(self, trades):
+    def train_chart_cnn_model(self, trades, voting_scores=None):
         """Train Chart Pattern Analyzer (LightGBM)"""
         print("\n📊 Training Chart Pattern Model (LightGBM)...")
+        
+        if voting_scores is None:
+            voting_scores = {'cnn': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5}}
+        
+        cnn_scores = voting_scores.get('cnn', {})
         
         features_list = []
         labels_list = []
@@ -656,6 +728,14 @@ class DeepLearningTrainerXGBoost:
                     data = json.loads(data)
                 
                 features = self.calculate_enhanced_features(data)
+                
+                # Add voting accuracy
+                features.extend([
+                    cnn_scores.get('tp_accuracy', 0.5),
+                    cnn_scores.get('amount_accuracy', 0.5),
+                    cnn_scores.get('sl_accuracy', 0.5),
+                    cnn_scores.get('sell_accuracy', 0.5)
+                ])
                 
                 profit = float(trade.get('profit_percent', 0))
                 label = 1 if profit > 0.5 else 0
@@ -714,7 +794,7 @@ class DeepLearningTrainerXGBoost:
         
         # 👑 الملك يتدرب أول
         try:
-            result = self.train_ai_brain_model(trades)
+            result = self.train_ai_brain_model(trades, voting_scores)
             if result:
                 self.models['ai_brain'], results['ai_brain_accuracy'] = result
         except Exception as e:
@@ -722,49 +802,49 @@ class DeepLearningTrainerXGBoost:
         
         # Train consultant models
         try:
-            result = self.train_smart_money_model(trades)
+            result = self.train_smart_money_model(trades, voting_scores)
             if result:
                 self.models['smart_money'], results['smart_money_accuracy'] = result
         except Exception as e:
             print(f"❌ Smart Money training error: {e}")
         
         try:
-            result = self.train_risk_model(trades)
+            result = self.train_risk_model(trades, voting_scores)
             if result:
                 self.models['risk'], results['risk_accuracy'] = result
         except Exception as e:
             print(f"❌ Risk training error: {e}")
         
         try:
-            result = self.train_anomaly_model(trades)
+            result = self.train_anomaly_model(trades, voting_scores)
             if result:
                 self.models['anomaly'], results['anomaly_accuracy'] = result
         except Exception as e:
             print(f"❌ Anomaly training error: {e}")
         
         try:
-            result = self.train_exit_model(trades)
+            result = self.train_exit_model(trades, voting_scores)
             if result:
                 self.models['exit'], results['exit_accuracy'] = result
         except Exception as e:
             print(f"❌ Exit training error: {e}")
         
         try:
-            result = self.train_pattern_model(trades)
+            result = self.train_pattern_model(trades, voting_scores)
             if result:
                 self.models['pattern'], results['pattern_accuracy'] = result
         except Exception as e:
             print(f"❌ Pattern training error: {e}")
         
         try:
-            result = self.train_liquidity_model(trades)
+            result = self.train_liquidity_model(trades, voting_scores)
             if result:
                 self.models['liquidity'], results['liquidity_accuracy'] = result
         except Exception as e:
             print(f"❌ Liquidity training error: {e}")
         
         try:
-            result = self.train_chart_cnn_model(trades)
+            result = self.train_chart_cnn_model(trades, voting_scores)
             if result:
                 self.models['chart_cnn'], results['chart_cnn_accuracy'] = result
         except Exception as e:
