@@ -156,13 +156,13 @@ class DeepLearningTrainerXGBoost:
             # Bollinger Bands approximation
             bb_position = (rsi - 30) / 40
             
-            # ATR approximation
+            # ATR approximation (محسّن)
             atr_estimate = abs(price_momentum) * volume_ratio
             
             # Stochastic approximation
             stochastic = rsi
             
-            # EMA crossover signal
+            # EMA crossover signal (محسّن)
             ema_signal = 1 if macd > 0 else -1
             
             # Volume strength
@@ -170,6 +170,25 @@ class DeepLearningTrainerXGBoost:
             
             # Momentum strength
             momentum_strength = abs(price_momentum) / 10.0
+            
+            # ========== الإضافات الجديدة (5 مؤشرات) ==========
+            
+            # 1. ATR (Average True Range) - للمخاطرة
+            atr = data.get('atr', atr_estimate)
+            
+            # 2. EMA 9/21 Crossover - للأنماط
+            ema_9 = data.get('ema_9', 0)
+            ema_21 = data.get('ema_21', 0)
+            ema_crossover = 1 if ema_9 > ema_21 else -1
+            
+            # 3. Bid-Ask Spread - للفخاخ
+            bid_ask_spread = data.get('bid_ask_spread', 0)
+            
+            # 4. Volume Trend - للبيع
+            volume_trend = data.get('volume_trend', 0)
+            
+            # 5. Price Change 1h - للشذوذ
+            price_change_1h = data.get('price_change_1h', 0)
             
             return [
                 rsi,
@@ -181,10 +200,15 @@ class DeepLearningTrainerXGBoost:
                 stochastic,
                 ema_signal,
                 volume_strength,
-                momentum_strength
+                momentum_strength,
+                atr,                    # جديد
+                ema_crossover,          # جديد
+                bid_ask_spread,         # جديد
+                volume_trend,           # جديد
+                price_change_1h         # جديد
             ]
         except:
-            return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0]
+            return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0]
 
     
     def train_mtf_model(self, trades):
@@ -204,7 +228,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('rsi', 50),
                     data.get('macd', 0),
                     data.get('volume_ratio', 1),
-                    data.get('price_momentum', 0)
+                    data.get('price_momentum', 0),
+                    data.get('atr', 1),
+                    data.get('ema_crossover', 0),
+                    data.get('bid_ask_spread', 0),
+                    data.get('volume_trend', 0),
+                    data.get('price_change_1h', 0)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -265,7 +294,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('anomaly_score', 0),
                     data.get('exit_score', 0),
                     data.get('pattern_score', 0),
-                    data.get('ranking_score', 0)
+                    data.get('ranking_score', 0),
+                    data.get('atr', 1),
+                    data.get('ema_crossover', 0),
+                    data.get('bid_ask_spread', 0),
+                    data.get('volume_trend', 0),
+                    data.get('price_change_1h', 0)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -320,7 +354,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('rsi', 50),
                     data.get('volume_ratio', 1),
                     data.get('confidence', 60),
-                    data.get('price_momentum', 0)
+                    data.get('price_momentum', 0),
+                    data.get('atr', 1),
+                    data.get('ema_crossover', 0),
+                    data.get('bid_ask_spread', 0),
+                    data.get('volume_trend', 0),
+                    data.get('price_change_1h', 0)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -374,7 +413,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('rsi', 50),
                     data.get('macd', 0),
                     data.get('volume_ratio', 1),
-                    data.get('price_momentum', 0)
+                    data.get('price_momentum', 0),
+                    data.get('atr', 1),
+                    data.get('ema_crossover', 0),
+                    data.get('bid_ask_spread', 0),
+                    data.get('volume_trend', 0),
+                    data.get('price_change_1h', 0)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -428,7 +472,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('rsi', 50),
                     data.get('macd', 0),
                     data.get('confidence', 60),
-                    data.get('price_momentum', 0)
+                    data.get('price_momentum', 0),
+                    data.get('atr', 1),
+                    data.get('ema_crossover', 0),
+                    data.get('bid_ask_spread', 0),
+                    data.get('volume_trend', 0),
+                    data.get('price_change_1h', 0)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
@@ -483,7 +532,12 @@ class DeepLearningTrainerXGBoost:
                     data.get('macd', 0),
                     data.get('volume_ratio', 1),
                     data.get('price_momentum', 0),
-                    data.get('confidence', 60)
+                    data.get('confidence', 60),
+                    data.get('atr', 1),
+                    data.get('ema_crossover', 0),
+                    data.get('bid_ask_spread', 0),
+                    data.get('volume_trend', 0),
+                    data.get('price_change_1h', 0)
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
