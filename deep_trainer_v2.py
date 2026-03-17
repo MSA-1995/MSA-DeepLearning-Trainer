@@ -380,9 +380,9 @@ class DeepLearningTrainerXGBoost:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
         model = lgb.LGBMClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
+            n_estimators=150,
+            max_depth=6,
+            learning_rate=0.08,
             random_state=42,
             verbose=-1
         )
@@ -440,7 +440,9 @@ class DeepLearningTrainerXGBoost:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                label = 1 if profit > 0.5 else 0
+                confidence = data.get('confidence', 60)
+                # تحسين Label: ربح جيد + ثقة عالية
+                label = 1 if (profit > 1.0 and confidence > 65) else 0
                 
                 features_list.append(features)
                 labels_list.append(label)
@@ -458,9 +460,9 @@ class DeepLearningTrainerXGBoost:
         
         # الملك يحتاج موديل أقوى
         model = lgb.LGBMClassifier(
-            n_estimators=200,
-            max_depth=7,
-            learning_rate=0.05,
+            n_estimators=250,
+            max_depth=8,
+            learning_rate=0.04,
             random_state=42,
             verbose=-1
         )
@@ -731,9 +733,9 @@ class DeepLearningTrainerXGBoost:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
         model = lgb.LGBMClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
+            n_estimators=150,
+            max_depth=6,
+            learning_rate=0.08,
             random_state=42,
             verbose=-1
         )
@@ -821,6 +823,9 @@ class DeepLearningTrainerXGBoost:
             avg_price_impact = sum(data.get('price_impacts', [0.5])) / len(data.get('price_impacts', [0.5]))
             avg_volume_consistency = sum(data.get('volume_consistencies', [50])) / len(data.get('volume_consistencies', [50]))
             
+            # حساب تذبذب Spread (Feature جديد)
+            spread_volatility = np.std(data['bid_ask_spreads']) if len(data['bid_ask_spreads']) > 1 else 0
+            
             features = [
                 avg_profit,
                 win_rate,
@@ -834,13 +839,15 @@ class DeepLearningTrainerXGBoost:
                 avg_liquidity_score,        # Order Book: Liquidity Score
                 avg_price_impact,           # Order Book: Price Impact
                 avg_volume_consistency,     # Order Book: Volume Consistency
+                spread_volatility,          # NEW: Spread Volatility
                 liquidity_scores.get('tp_accuracy', 0.5),
                 liquidity_scores.get('amount_accuracy', 0.5),
                 liquidity_scores.get('sl_accuracy', 0.5),
                 liquidity_scores.get('sell_accuracy', 0.5)
             ]
             
-            label = 1 if avg_profit > 0 and win_rate > 0.5 else 0
+            # تحسين Label: ربح جيد + win rate عالي + سيولة جيدة
+            label = 1 if (avg_profit > 0.5 and win_rate > 0.6 and avg_liquidity_score > 60) else 0
             
             features_list.append(features)
             labels_list.append(label)
@@ -855,9 +862,9 @@ class DeepLearningTrainerXGBoost:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
         model = lgb.LGBMClassifier(
-            n_estimators=100,
-            max_depth=4,
-            learning_rate=0.1,
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.05,
             random_state=42,
             verbose=-1
         )
