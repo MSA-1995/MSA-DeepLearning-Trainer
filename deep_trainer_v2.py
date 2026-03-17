@@ -63,12 +63,12 @@ class DeepLearningTrainerXGBoost:
         # 8 موديلات: AI Brain + 7 مستشارين (كلهم LightGBM)
         self.models = {
             'ai_brain': None,      # AI Brain - LightGBM
-            'mtf': None,           # Multi-Timeframe - LightGBM
+            'smart_money': None,   # Smart Money Tracker - LightGBM (بديل MTF)
             'risk': None,          # Risk Manager - LightGBM
             'anomaly': None,       # Anomaly Detector - LightGBM
             'exit': None,          # Exit Strategy - LightGBM
             'pattern': None,       # Pattern Recognition - LightGBM
-            'ranking': None,       # Coin Ranking - LightGBM
+            'liquidity': None,     # Liquidity Analyzer - LightGBM (بديل Ranking)
             'chart_cnn': None      # Chart Pattern Analyzer - LightGBM
         }
         
@@ -211,9 +211,9 @@ class DeepLearningTrainerXGBoost:
             return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0]
 
     
-    def train_mtf_model(self, trades):
-        """Train Multi-Timeframe Analyzer"""
-        print("\n🎓 Training MTF Model (LightGBM)...")
+    def train_smart_money_model(self, trades):
+        """Train Smart Money Tracker (بديل MTF)"""
+        print("\n🐋 Training Smart Money Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -266,7 +266,7 @@ class DeepLearningTrainerXGBoost:
         y_pred = model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
         
-        print(f"✅ MTF Model: Accuracy {accuracy*100:.2f}%")
+        print(f"🐋 Smart Money Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
@@ -574,9 +574,9 @@ class DeepLearningTrainerXGBoost:
         
         return model, accuracy
     
-    def train_ranking_model(self, trades):
-        """Train Coin Ranking"""
-        print("\n🎓 Training Ranking Model (LightGBM)...")
+    def train_liquidity_model(self, trades):
+        """Train Liquidity Analyzer (بديل Ranking)"""
+        print("\n💧 Training Liquidity Model (LightGBM)...")
         
         coin_data = {}
         
@@ -638,7 +638,7 @@ class DeepLearningTrainerXGBoost:
         y_pred = model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
         
-        print(f"✅ Ranking Model: Accuracy {accuracy*100:.2f}%")
+        print(f"💧 Liquidity Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
@@ -722,11 +722,11 @@ class DeepLearningTrainerXGBoost:
         
         # Train consultant models
         try:
-            result = self.train_mtf_model(trades)
+            result = self.train_smart_money_model(trades)
             if result:
-                self.models['mtf'], results['mtf_accuracy'] = result
+                self.models['smart_money'], results['smart_money_accuracy'] = result
         except Exception as e:
-            print(f"❌ MTF training error: {e}")
+            print(f"❌ Smart Money training error: {e}")
         
         try:
             result = self.train_risk_model(trades)
@@ -757,11 +757,11 @@ class DeepLearningTrainerXGBoost:
             print(f"❌ Pattern training error: {e}")
         
         try:
-            result = self.train_ranking_model(trades)
+            result = self.train_liquidity_model(trades)
             if result:
-                self.models['ranking'], results['ranking_accuracy'] = result
+                self.models['liquidity'], results['liquidity_accuracy'] = result
         except Exception as e:
-            print(f"❌ Ranking training error: {e}")
+            print(f"❌ Liquidity training error: {e}")
         
         try:
             result = self.train_chart_cnn_model(trades)
@@ -855,12 +855,12 @@ class DeepLearningTrainerXGBoost:
             print(f"⚠️ Error calculating voting accuracy: {e}")
             return {
                 'exit': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'mtf': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
+                'smart_money': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
                 'risk': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
                 'pattern': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
                 'cnn': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
                 'anomaly': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'ranking': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5}
+                'liquidity': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5}
             }
     
     def save_models_to_db(self, results, retry=3):
