@@ -363,7 +363,9 @@ class DeepLearningTrainerXGBoost:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                label = 1 if profit > 0 else 0
+                volume_ratio = data.get('volume_ratio', 1)
+                # تحسين Label: ربح جيد + volume قوي
+                label = 1 if (profit > 0.8 and volume_ratio > 1.2) else 0
                 
                 features_list.append(features)
                 labels_list.append(label)
@@ -716,7 +718,9 @@ class DeepLearningTrainerXGBoost:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                label = 1 if profit > 0.5 else 0
+                rsi = data.get('rsi', 50)
+                # تحسين Label: ربح جيد + RSI مناسب
+                label = 1 if (profit > 0.8 and 30 < rsi < 70) else 0
                 
                 features_list.append(features)
                 labels_list.append(label)
