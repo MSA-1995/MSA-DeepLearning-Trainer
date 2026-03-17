@@ -17,6 +17,23 @@ try:
 except Exception as e:
     print(f"⚠️ pip update skipped: {e}")
 
+# ========== AUTO-INSTALL REQUESTS ==========
+try:
+    import requests
+    print("✅ requests module loaded")
+except ImportError:
+    print("📦 Installing requests...")
+    result = subprocess.run([sys.executable, '-m', 'pip', 'install', 'requests'], 
+                   capture_output=True, check=False, timeout=30, text=True)
+    print(f"Installation output: {result.stdout}")
+    try:
+        import requests
+        print("✅ requests installed successfully")
+    except Exception as e:
+        print(f"❌ Failed to install requests: {e}")
+        print("⚠️ Critical alerts will not work")
+        requests = None
+
 # ========== LOAD ENV FILE ==========
 import os
 for _env_file in [
@@ -41,7 +58,6 @@ from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse, unquote
-import requests
 
 try:
     import numpy as np
@@ -106,7 +122,7 @@ CRITICAL_WEBHOOK = get_critical_webhook()
 
 def send_critical_alert(error_type, message, details=None):
     """Send critical error alert to Discord"""
-    if not CRITICAL_WEBHOOK:
+    if not CRITICAL_WEBHOOK or not requests:
         return
     
     fields = [
