@@ -648,11 +648,27 @@ class DeepLearningTrainerXGBoost:
                 symbol = trade.get('symbol')
                 profit = float(trade.get('profit_percent', 0))
                 
+                # Extract liquidity data from trade
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
+                
                 if symbol not in coin_data:
-                    coin_data[symbol] = {'profits': [], 'count': 0}
+                    coin_data[symbol] = {
+                        'profits': [],
+                        'count': 0,
+                        'volume_ratios': [],
+                        'bid_ask_spreads': [],
+                        'volume_trends': []
+                    }
                 
                 coin_data[symbol]['profits'].append(profit)
                 coin_data[symbol]['count'] += 1
+                
+                # Add liquidity-related data
+                coin_data[symbol]['volume_ratios'].append(data.get('volume_ratio', 1.0))
+                coin_data[symbol]['bid_ask_spreads'].append(data.get('bid_ask_spread', 0))
+                coin_data[symbol]['volume_trends'].append(data.get('volume_trend', 0))
             except:
                 continue
         
@@ -666,12 +682,20 @@ class DeepLearningTrainerXGBoost:
             avg_profit = sum(data['profits']) / len(data['profits'])
             win_rate = sum(1 for p in data['profits'] if p > 0) / len(data['profits'])
             
+            # Calculate liquidity metrics
+            avg_volume_ratio = sum(data['volume_ratios']) / len(data['volume_ratios']) if data['volume_ratios'] else 1.0
+            avg_bid_ask_spread = sum(data['bid_ask_spreads']) / len(data['bid_ask_spreads']) if data['bid_ask_spreads'] else 0
+            avg_volume_trend = sum(data['volume_trends']) / len(data['volume_trends']) if data['volume_trends'] else 0
+            
             features = [
                 avg_profit,
                 win_rate,
                 data['count'],
                 max(data['profits']),
                 min(data['profits']),
+                avg_volume_ratio,           # Liquidity: Volume
+                avg_bid_ask_spread,         # Liquidity: Spread
+                avg_volume_trend,           # Liquidity: Trend
                 liquidity_scores.get('tp_accuracy', 0.5),
                 liquidity_scores.get('amount_accuracy', 0.5),
                 liquidity_scores.get('sl_accuracy', 0.5),
@@ -684,7 +708,7 @@ class DeepLearningTrainerXGBoost:
             labels_list.append(label)
         
         if len(features_list) < 20:
-            print("⚠️ Not enough coins for Ranking")
+            print("⚠️ Not enough coins for Liquidity")
             return None
         
         X = np.array(features_list)
