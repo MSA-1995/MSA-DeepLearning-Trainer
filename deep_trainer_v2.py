@@ -784,6 +784,19 @@ class DeepLearningTrainerXGBoost:
                 coin_data[symbol]['volume_ratios'].append(data.get('volume_ratio', 1.0))
                 coin_data[symbol]['bid_ask_spreads'].append(data.get('bid_ask_spread', 0))
                 coin_data[symbol]['volume_trends'].append(data.get('volume_trend', 0))
+                
+                # إضافة بيانات Order Book الجديدة
+                liquidity = data.get('liquidity', {})
+                if 'depth_ratios' not in coin_data[symbol]:
+                    coin_data[symbol]['depth_ratios'] = []
+                    coin_data[symbol]['liquidity_scores'] = []
+                    coin_data[symbol]['price_impacts'] = []
+                    coin_data[symbol]['volume_consistencies'] = []
+                
+                coin_data[symbol]['depth_ratios'].append(liquidity.get('depth_ratio', 1.0))
+                coin_data[symbol]['liquidity_scores'].append(liquidity.get('liquidity_score', 50))
+                coin_data[symbol]['price_impacts'].append(liquidity.get('price_impact', 0.5))
+                coin_data[symbol]['volume_consistencies'].append(liquidity.get('volume_consistency', 50))
             except:
                 continue
         
@@ -802,6 +815,12 @@ class DeepLearningTrainerXGBoost:
             avg_bid_ask_spread = sum(data['bid_ask_spreads']) / len(data['bid_ask_spreads']) if data['bid_ask_spreads'] else 0
             avg_volume_trend = sum(data['volume_trends']) / len(data['volume_trends']) if data['volume_trends'] else 0
             
+            # بيانات Order Book الجديدة
+            avg_depth_ratio = sum(data.get('depth_ratios', [1.0])) / len(data.get('depth_ratios', [1.0]))
+            avg_liquidity_score = sum(data.get('liquidity_scores', [50])) / len(data.get('liquidity_scores', [50]))
+            avg_price_impact = sum(data.get('price_impacts', [0.5])) / len(data.get('price_impacts', [0.5]))
+            avg_volume_consistency = sum(data.get('volume_consistencies', [50])) / len(data.get('volume_consistencies', [50]))
+            
             features = [
                 avg_profit,
                 win_rate,
@@ -811,6 +830,10 @@ class DeepLearningTrainerXGBoost:
                 avg_volume_ratio,           # Liquidity: Volume
                 avg_bid_ask_spread,         # Liquidity: Spread
                 avg_volume_trend,           # Liquidity: Trend
+                avg_depth_ratio,            # Order Book: Depth Ratio
+                avg_liquidity_score,        # Order Book: Liquidity Score
+                avg_price_impact,           # Order Book: Price Impact
+                avg_volume_consistency,     # Order Book: Volume Consistency
                 liquidity_scores.get('tp_accuracy', 0.5),
                 liquidity_scores.get('amount_accuracy', 0.5),
                 liquidity_scores.get('sl_accuracy', 0.5),
