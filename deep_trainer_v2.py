@@ -1,5 +1,5 @@
 """
-🧠 Deep Learning Trainer V3 - 8 Specialized Models (7 LSTM + 1 CNN)
+🧠 Deep Learning Trainer V2 - 8 Specialized Models (LightGBM)
 Trains AI Brain + 7 Consultant Models for trading decisions
 """
 
@@ -20,7 +20,7 @@ except Exception as e:
 # ========== LOAD ENV FILE ==========
 import os
 for _env_file in [
-    '/home/container/DeepLearningTrainer/.env',
+    '/home/container/DeepLearningTrainer_XGBoost/.env',
     '/home/container/.env',
 ]:
     try:
@@ -36,6 +36,7 @@ for _env_file in [
 
 import time
 import json
+import pickle
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -44,37 +45,36 @@ from urllib.parse import urlparse, unquote
 try:
     import numpy as np
     import pandas as pd
-    os.environ['KERAS_BACKEND'] = 'jax'
-    import keras
-    from keras import layers
-    DL_AVAILABLE = True
-    print(f"✅ Keras {keras.__version__} with JAX backend loaded")
+    import lightgbm as lgb
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, classification_report
+    ML_AVAILABLE = True
+    print(f"✅ LightGBM {lgb.__version__} loaded")
 except ImportError:
-    print("❌ Keras not installed. Run: pip install keras jax jaxlib")
-    DL_AVAILABLE = False
+    print("❌ LightGBM not installed. Run: pip install lightgbm scikit-learn")
+    ML_AVAILABLE = False
     sys.exit(1)
 
-class DeepLearningTrainerV2:
+class DeepLearningTrainerXGBoost:
     def __init__(self, database_url):
         self.database_url = database_url
         self.conn = self._connect_db()
         
-        # 8 موديلات: AI Brain + 7 مستشارين (6 LSTM + 1 CNN)
+        # 8 موديلات: AI Brain + 7 مستشارين (كلهم LightGBM)
         self.models = {
-            'ai_brain': None,      # AI Brain - LSTM
-            'mtf': None,           # Multi-Timeframe - LSTM
-            'risk': None,          # Risk Manager - LSTM
-            'anomaly': None,       # Anomaly Detector - LSTM
-            'exit': None,          # Exit Strategy - LSTM
-            'pattern': None,       # Pattern Recognition - LSTM
-            'ranking': None,       # Coin Ranking - LSTM
-            'chart_cnn': None      # Chart Pattern Analyzer - CNN (جديد)
+            'ai_brain': None,      # AI Brain - LightGBM
+            'mtf': None,           # Multi-Timeframe - LightGBM
+            'risk': None,          # Risk Manager - LightGBM
+            'anomaly': None,       # Anomaly Detector - LightGBM
+            'exit': None,          # Exit Strategy - LightGBM
+            'pattern': None,       # Pattern Recognition - LightGBM
+            'ranking': None,       # Coin Ranking - LightGBM
+            'chart_cnn': None      # Chart Pattern Analyzer - LightGBM
         }
         
-        self.sequence_length = 10
         self.min_trades_for_training = 100
         
-        print("🧠 Deep Learning Trainer V3 initialized (8 Models: 7 LSTM + 1 CNN)")
+        print("🧠 Deep Learning Trainer V2 initialized (8 Models - LightGBM)")
     
     def _connect_db(self):
         """Connect to PostgreSQL"""
@@ -110,7 +110,7 @@ class DeepLearningTrainerV2:
         return self.conn
     
     def load_training_data(self):
-        """Load historical trades for LSTM training"""
+        """Load historical trades for training"""
         if not self.conn:
             return None
         
@@ -145,44 +145,6 @@ class DeepLearningTrainerV2:
             print(f"❌ Error loading data: {e}")
             return None
     
-    def build_lstm_model(self, sequence_length, n_features, output_dim=1, model_type='binary'):
-        """Build LSTM model"""
-        model = keras.Sequential([
-            layers.Input(shape=(sequence_length, n_features)),
-            layers.LSTM(64, return_sequences=True),
-            layers.Dropout(0.3),
-            layers.LSTM(32, return_sequences=False),
-            layers.Dropout(0.2),
-            layers.Dense(16, activation='relu'),
-            layers.Dropout(0.2),
-        ])
-        
-        if model_type == 'binary':
-            model.add(layers.Dense(output_dim, activation='sigmoid'))
-            model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-        elif model_type == 'regression':
-            model.add(layers.Dense(output_dim, activation='linear'))
-            model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-        elif model_type == 'multiclass':
-            model.add(layers.Dense(output_dim, activation='softmax'))
-            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-        
-        return model
-    
-    def prepare_sequences(self, features_list, labels_list):
-        """تحويل البيانات لـ sequences"""
-        X_sequences = []
-        y_sequences = []
-        
-        for i in range(len(features_list) - self.sequence_length):
-            sequence = features_list[i:i + self.sequence_length]
-            label = labels_list[i + self.sequence_length]
-            
-            X_sequences.append(sequence)
-            y_sequences.append(label)
-        
-        return np.array(X_sequences, dtype=np.float32), np.array(y_sequences, dtype=np.float32)
-    
     def calculate_enhanced_features(self, data):
         """Feature Engineering: حساب مؤشرات إضافية"""
         try:
@@ -192,19 +154,19 @@ class DeepLearningTrainerV2:
             price_momentum = data.get('price_momentum', 0)
             
             # Bollinger Bands approximation
-            bb_position = (rsi - 30) / 40  # normalized position in BB
+            bb_position = (rsi - 30) / 40
             
-            # ATR approximation (from volatility)
+            # ATR approximation
             atr_estimate = abs(price_momentum) * volume_ratio
             
             # Stochastic approximation
-            stochastic = rsi  # simplified
+            stochastic = rsi
             
             # EMA crossover signal
             ema_signal = 1 if macd > 0 else -1
             
             # Volume strength
-            volume_strength = min(volume_ratio / 2.0, 2.0)  # normalized
+            volume_strength = min(volume_ratio / 2.0, 2.0)
             
             # Momentum strength
             momentum_strength = abs(price_momentum) / 10.0
@@ -223,26 +185,11 @@ class DeepLearningTrainerV2:
             ]
         except:
             return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0]
-    
-    def build_cnn_model(self, sequence_length, n_features):
-        """Build CNN model for chart pattern analysis"""
-        model = keras.Sequential([
-            layers.Input(shape=(sequence_length, n_features)),
-            layers.Conv1D(64, kernel_size=3, activation='relu', padding='same'),
-            layers.MaxPooling1D(pool_size=2),
-            layers.Conv1D(32, kernel_size=3, activation='relu', padding='same'),
-            layers.GlobalMaxPooling1D(),
-            layers.Dense(16, activation='relu'),
-            layers.Dropout(0.3),
-            layers.Dense(1, activation='sigmoid')
-        ])
-        
-        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-        return model
+
     
     def train_mtf_model(self, trades):
         """Train Multi-Timeframe Analyzer"""
-        print("\n🎓 Training MTF Model...")
+        print("\n🎓 Training MTF Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -261,7 +208,6 @@ class DeepLearningTrainerV2:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                # MTF: توقع الترند (bullish=1, bearish=0)
                 label = 1 if profit > 0 else 0
                 
                 features_list.append(features)
@@ -269,28 +215,35 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
+        if len(features_list) < 50:
             print("⚠️ Not enough data for MTF")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model = lgb.LGBMClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
         print(f"✅ MTF Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
     def train_ai_brain_model(self, trades):
         """Train AI Brain (الملك) - القرار النهائي"""
-        print("\n👑 Training AI Brain Model...")
+        print("\n👑 Training AI Brain Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -301,7 +254,6 @@ class DeepLearningTrainerV2:
                 if isinstance(data, str):
                     data = json.loads(data)
                 
-                # الملك ياخذ كل المعلومات
                 features = [
                     data.get('rsi', 50),
                     data.get('macd', 0),
@@ -317,7 +269,6 @@ class DeepLearningTrainerV2:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                # الملك يتعلم: هل القرار كان صح؟ (ربح = 1, خسارة = 0)
                 label = 1 if profit > 0.5 else 0
                 
                 features_list.append(features)
@@ -325,40 +276,36 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
+        if len(features_list) < 50:
             print("⚠️ Not enough data for AI Brain")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        # الملك يحتاج موديل أكبر (أذكى)
-        model = keras.Sequential([
-            layers.Input(shape=(self.sequence_length, X.shape[2])),
-            layers.LSTM(128, return_sequences=True),  # أكبر من الباقي
-            layers.Dropout(0.3),
-            layers.LSTM(64, return_sequences=False),
-            layers.Dropout(0.2),
-            layers.Dense(32, activation='relu'),
-            layers.Dropout(0.2),
-            layers.Dense(1, activation='sigmoid')
-        ])
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        # الملك يحتاج موديل أقوى
+        model = lgb.LGBMClassifier(
+            n_estimators=200,
+            max_depth=7,
+            learning_rate=0.05,
+            random_state=42,
+            verbose=-1
+        )
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model.fit(X_train, y_train)
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
         print(f"👑 AI Brain Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
     def train_risk_model(self, trades):
         """Train Risk Manager"""
-        print("\n🎓 Training Risk Model...")
+        print("\n🎓 Training Risk Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -377,7 +324,6 @@ class DeepLearningTrainerV2:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                # Risk: توقع مستوى المخاطرة (high_risk=1 if loss, low_risk=0)
                 label = 1 if profit < -1.0 else 0
                 
                 features_list.append(features)
@@ -385,29 +331,35 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
+        if len(features_list) < 50:
             print("⚠️ Not enough data for Risk")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model = lgb.LGBMClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
         print(f"✅ Risk Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
-
     
     def train_anomaly_model(self, trades):
         """Train Anomaly Detector"""
-        print("\n🎓 Training Anomaly Model...")
+        print("\n🎓 Training Anomaly Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -426,7 +378,6 @@ class DeepLearningTrainerV2:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                # Anomaly: كشف الحالات الشاذة (خسارة كبيرة)
                 label = 1 if profit < -1.5 else 0
                 
                 features_list.append(features)
@@ -434,28 +385,35 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
+        if len(features_list) < 50:
             print("⚠️ Not enough data for Anomaly")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model = lgb.LGBMClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
         print(f"✅ Anomaly Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
     def train_exit_model(self, trades):
         """Train Exit Strategy"""
-        print("\n🎓 Training Exit Model...")
+        print("\n🎓 Training Exit Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -474,7 +432,6 @@ class DeepLearningTrainerV2:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                # Exit: متى نبيع؟ (sell_now=1 if profit>1 or loss<-1)
                 label = 1 if (profit > 1.0 or profit < -1.0) else 0
                 
                 features_list.append(features)
@@ -482,28 +439,35 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
+        if len(features_list) < 50:
             print("⚠️ Not enough data for Exit")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model = lgb.LGBMClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
         print(f"✅ Exit Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
     def train_pattern_model(self, trades):
         """Train Pattern Recognition"""
-        print("\n🎓 Training Pattern Model...")
+        print("\n🎓 Training Pattern Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -523,7 +487,6 @@ class DeepLearningTrainerV2:
                 ]
                 
                 profit = float(trade.get('profit_percent', 0))
-                # Pattern: نمط ناجح أو فخ
                 label = 1 if profit > 0.5 else 0
                 
                 features_list.append(features)
@@ -531,30 +494,36 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
+        if len(features_list) < 50:
             print("⚠️ Not enough data for Pattern")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        model = self.build_lstm_model(self.sequence_length, X.shape[2], output_dim=1, model_type='binary')
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model = lgb.LGBMClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
         print(f"✅ Pattern Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
     def train_ranking_model(self, trades):
         """Train Coin Ranking"""
-        print("\n🎓 Training Ranking Model...")
+        print("\n🎓 Training Ranking Model (LightGBM)...")
         
-        # تجميع البيانات حسب العملة
         coin_data = {}
         
         for trade in trades:
@@ -588,7 +557,6 @@ class DeepLearningTrainerV2:
                 min(data['profits'])
             ]
             
-            # Ranking: عملة جيدة أو سيئة
             label = 1 if avg_profit > 0 and win_rate > 0.5 else 0
             
             features_list.append(features)
@@ -598,35 +566,31 @@ class DeepLearningTrainerV2:
             print("⚠️ Not enough coins for Ranking")
             return None
         
-        # Ranking لا يحتاج sequences (بيانات ثابتة لكل عملة)
-        X = np.array(features_list, dtype=np.float32)
-        y = np.array(labels_list, dtype=np.float32)
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        # موديل بسيط (بدون LSTM)
-        model = keras.Sequential([
-            layers.Input(shape=(5,)),
-            layers.Dense(32, activation='relu'),
-            layers.Dropout(0.3),
-            layers.Dense(16, activation='relu'),
-            layers.Dense(1, activation='sigmoid')
-        ])
+        model = lgb.LGBMClassifier(
+            n_estimators=100,
+            max_depth=4,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
         
-        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        model.fit(X_train, y_train)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=16, validation_split=0.2, verbose=0)
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
         print(f"✅ Ranking Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
     
     def train_chart_cnn_model(self, trades):
-        """Train Chart Pattern Analyzer (CNN)"""
-        print("\n📊 Training Chart CNN Model...")
+        """Train Chart Pattern Analyzer (LightGBM)"""
+        print("\n📊 Training Chart Pattern Model (LightGBM)...")
         
         features_list = []
         labels_list = []
@@ -637,11 +601,9 @@ class DeepLearningTrainerV2:
                 if isinstance(data, str):
                     data = json.loads(data)
                 
-                # استخدام Feature Engineering المحسّن
                 features = self.calculate_enhanced_features(data)
                 
                 profit = float(trade.get('profit_percent', 0))
-                # CNN: كشف أنماط الشارت الناجحة
                 label = 1 if profit > 0.5 else 0
                 
                 features_list.append(features)
@@ -649,29 +611,37 @@ class DeepLearningTrainerV2:
             except:
                 continue
         
-        X, y = self.prepare_sequences(features_list, labels_list)
-        
-        if len(X) < 50:
-            print("⚠️ Not enough data for Chart CNN")
+        if len(features_list) < 50:
+            print("⚠️ Not enough data for Chart Pattern")
             return None
         
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X = np.array(features_list)
+        y = np.array(labels_list)
         
-        model = self.build_cnn_model(self.sequence_length, X.shape[2])
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2, verbose=0)
+        model = lgb.LGBMClassifier(
+            n_estimators=150,
+            max_depth=6,
+            learning_rate=0.08,
+            random_state=42,
+            verbose=-1
+        )
         
-        loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
-        print(f"📊 Chart CNN Model: Accuracy {accuracy*100:.2f}%")
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        print(f"📊 Chart Pattern Model: Accuracy {accuracy*100:.2f}%")
         
         return model, accuracy
+
     
     def train_all_models(self):
-        """Train all 8 models (AI Brain + 7 Consultants: 6 LSTM + 1 CNN)"""
+        """Train all 8 models (AI Brain + 7 Consultants: LightGBM)"""
         print("\n" + "="*60)
-        print("👑 Starting Training - 8 Models (7 LSTM + 1 CNN)")
+        print("👑 Starting Training - 8 LightGBM Models")
         print("="*60)
         
         trades = self.load_training_data()
@@ -680,7 +650,7 @@ class DeepLearningTrainerV2:
         
         results = {}
         
-        # 🎯 حساب دقة التصويت أولاً (التعلم من الأداء السابق)
+        # 🎯 حساب دقة التصويت أولاً
         try:
             voting_scores = self.calculate_voting_accuracy(trades)
             results['voting_scores'] = voting_scores
@@ -688,7 +658,7 @@ class DeepLearningTrainerV2:
             print(f"⚠️ Voting accuracy calculation error: {e}")
             results['voting_scores'] = {}
         
-        # 👑 الملك يتدرب أول (الأهم)
+        # 👑 الملك يتدرب أول
         try:
             result = self.train_ai_brain_model(trades)
             if result:
@@ -739,13 +709,12 @@ class DeepLearningTrainerV2:
         except Exception as e:
             print(f"❌ Ranking training error: {e}")
         
-        # Train CNN model
         try:
             result = self.train_chart_cnn_model(trades)
             if result:
                 self.models['chart_cnn'], results['chart_cnn_accuracy'] = result
         except Exception as e:
-            print(f"❌ Chart CNN training error: {e}")
+            print(f"❌ Chart Pattern training error: {e}")
         
         # Save models
         self.save_all_models()
@@ -753,35 +722,31 @@ class DeepLearningTrainerV2:
         # Save to database
         self.save_models_to_db(results)
         
-        print("\n✅ All 8 models trained successfully!")
-        print("🎓 Consultants learned from voting accuracy!")
+        print("\n✅ All 8 LightGBM models trained successfully!")
         return True
     
     def save_all_models(self):
         """Save all models to files"""
-        print("\n💾 Saving models...")
+        print("\n💾 Saving LightGBM models...")
         
         for model_name, model in self.models.items():
             if model:
                 try:
-                    model_path = os.path.join(os.path.dirname(__file__), f'{model_name}_model.keras')
-                    model.save(model_path)
+                    model_path = os.path.join(os.path.dirname(__file__), f'{model_name}_model.pkl')
+                    with open(model_path, 'wb') as f:
+                        pickle.dump(model, f)
                     print(f"  ✅ {model_name} saved")
                 except Exception as e:
                     print(f"  ❌ {model_name} save error: {e}")
     
     def calculate_voting_accuracy(self, trades):
-        """
-        🎯 حساب دقة تصويت المستشارين من جدول consultant_votes
-        Returns: accuracy scores for each consultant
-        """
+        """حساب دقة تصويت المستشارين من جدول consultant_votes"""
         print("\n🎯 Calculating voting accuracy from database...")
         
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            # قراءة نتائج التصويت من الجدول
             cursor.execute("""
                 SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
                 FROM consultant_votes
@@ -792,7 +757,6 @@ class DeepLearningTrainerV2:
             results = cursor.fetchall()
             cursor.close()
             
-            # حساب الدقة لكل مستشار
             consultant_scores = {}
             
             for row in results:
@@ -812,7 +776,6 @@ class DeepLearningTrainerV2:
                 key = f"{vote_type}_{'correct' if is_correct else 'wrong'}"
                 consultant_scores[consultant_name][key] = count
             
-            # حساب النسب المئوية
             final_scores = {}
             for consultant, scores in consultant_scores.items():
                 tp_total = scores['tp_correct'] + scores['tp_wrong']
@@ -836,7 +799,6 @@ class DeepLearningTrainerV2:
         
         except Exception as e:
             print(f"⚠️ Error calculating voting accuracy: {e}")
-            # Fallback: دقة افتراضية
             return {
                 'exit': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
                 'mtf': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
@@ -846,11 +808,9 @@ class DeepLearningTrainerV2:
                 'anomaly': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
                 'ranking': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5}
             }
-
-        return final_scores
     
     def save_models_to_db(self, results, retry=3):
-        """Save models info to database (simple - no voting_accuracy column needed)"""
+        """Save models info to database (نفس الجدول القديم dl_models_v2)"""
         if not self.conn:
             print("⚠️ No database connection - models saved to files only")
             return False
@@ -862,7 +822,7 @@ class DeepLearningTrainerV2:
                 cursor = conn.cursor()
                 
                 print("📋 Checking table...")
-                # Create table if not exists (no voting_accuracy column)
+                # نفس الجدول القديم dl_models_v2
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS dl_models_v2 (
                         id SERIAL PRIMARY KEY,
@@ -876,7 +836,6 @@ class DeepLearningTrainerV2:
                 conn.commit()
                 
                 print("🗑️ Deleting old data...")
-                # Delete old data (faster than DROP)
                 cursor.execute("DELETE FROM dl_models_v2")
                 conn.commit()
                 
@@ -888,12 +847,12 @@ class DeepLearningTrainerV2:
                     cursor.execute("""
                         INSERT INTO dl_models_v2 (model_name, model_type, accuracy)
                         VALUES (%s, %s, %s)
-                    """, (model_name, 'LSTM', float(accuracy)))
+                    """, (model_name, 'LightGBM', float(accuracy)))
                 
                 conn.commit()
                 cursor.close()
                 
-                print("✅ Models info saved to database")
+                print("✅ Models info saved to database (dl_models_v2)")
                 return True
             
             except Exception as e:
@@ -909,7 +868,7 @@ class DeepLearningTrainerV2:
     
     def run_continuous(self, interval_hours=12):
         """Run training continuously"""
-        print(f"\n🚀 Deep Learning Trainer V3 started!")
+        print(f"\n🚀 Deep Learning Trainer V2 started (LightGBM)!")
         print(f"⏰ Training interval: {interval_hours} hours")
         print("="*60)
         
@@ -940,9 +899,9 @@ class DeepLearningTrainerV2:
                 time.sleep(1800)
 
 def main():
-    if not DL_AVAILABLE:
-        print("❌ Please install Keras:")
-        print("   pip install keras jax jaxlib")
+    if not ML_AVAILABLE:
+        print("❌ Please install LightGBM:")
+        print("   pip install lightgbm scikit-learn")
         return
     
     database_url = os.getenv('DATABASE_URL')
@@ -950,7 +909,7 @@ def main():
         print("❌ DATABASE_URL not found!")
         return
     
-    trainer = DeepLearningTrainerV2(database_url)
+    trainer = DeepLearningTrainerXGBoost(database_url)
     trainer.run_continuous(interval_hours=6)
 
 if __name__ == "__main__":
