@@ -1076,7 +1076,8 @@ class DeepLearningTrainerXGBoost:
                         'tp_correct': 0, 'tp_wrong': 0,
                         'amount_correct': 0, 'amount_wrong': 0,
                         'sl_correct': 0, 'sl_wrong': 0,
-                        'sell_correct': 0, 'sell_wrong': 0
+                        'sell_correct': 0, 'sell_wrong': 0,
+                        'buy_correct': 0, 'buy_wrong': 0
                     }
                 
                 key = f"{vote_type}_{'correct' if is_correct else 'wrong'}"
@@ -1088,32 +1089,36 @@ class DeepLearningTrainerXGBoost:
                 amount_total = scores['amount_correct'] + scores['amount_wrong']
                 sl_total = scores['sl_correct'] + scores['sl_wrong']
                 sell_total = scores['sell_correct'] + scores['sell_wrong']
+                buy_total = scores['buy_correct'] + scores['buy_wrong']
                 
                 final_scores[consultant] = {
                     'tp_accuracy': scores['tp_correct'] / tp_total if tp_total > 0 else 0.5,
                     'amount_accuracy': scores['amount_correct'] / amount_total if amount_total > 0 else 0.5,
                     'sl_accuracy': scores['sl_correct'] / sl_total if sl_total > 0 else 0.5,
                     'sell_accuracy': scores['sell_correct'] / sell_total if sell_total > 0 else 0.5,
+                    'buy_accuracy': scores['buy_correct'] / buy_total if buy_total > 0 else 0.5,
                     'overall_accuracy': (
-                        (scores['tp_correct'] + scores['amount_correct'] + scores['sl_correct'] + scores['sell_correct']) /
-                        max(tp_total + amount_total + sl_total + sell_total, 1)
+                        (scores['tp_correct'] + scores['amount_correct'] + scores['sl_correct'] + 
+                         scores['sell_correct'] + scores['buy_correct']) /
+                        max(tp_total + amount_total + sl_total + sell_total + buy_total, 1)
                     )
                 }
             
-            print(f"✅ Loaded voting accuracy for {len(final_scores)} consultants")
+            if final_scores:
+                print(f"✅ Loaded voting accuracy for {len(final_scores)} consultants:")
+                for consultant, scores in final_scores.items():
+                    overall = scores['overall_accuracy']
+                    buy_acc = scores['buy_accuracy']
+                    sell_acc = scores['sell_accuracy']
+                    print(f"   • {consultant}: Overall {overall*100:.1f}% | Buy {buy_acc*100:.1f}% | Sell {sell_acc*100:.1f}%")
+            else:
+                print(f"⚠️ No voting data found yet (table is new)")
+            
             return final_scores
         
         except Exception as e:
             print(f"⚠️ Error calculating voting accuracy: {e}")
-            return {
-                'exit': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'smart_money': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'risk': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'pattern': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'cnn': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'anomaly': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5},
-                'liquidity': {'tp_accuracy': 0.5, 'amount_accuracy': 0.5, 'sl_accuracy': 0.5, 'sell_accuracy': 0.5, 'overall_accuracy': 0.5}
-            }
+            return {}
     
     def save_models_to_db(self, results, retry=3):
         """Save models info to database (نفس الجدول القديم dl_models_v2)"""
@@ -1172,29 +1177,103 @@ class DeepLearningTrainerXGBoost:
         
         return False
     
-    def run_continuous(self, interval_hours=12):
-        """Run training continuously"""
+    def get_new_trades_count(self):
+        """حساب عدد الصفقات الجديدة منذ آخر تدريب"""
+        try:
+            conn = self._get_conn()
+            if not conn:
+                return 0
+            
+            cursor = conn.cursor()
+            
+            # جلب آخر وقت تدريب
+            cursor.execute("""
+                SELECT MAX(trained_at) as last_training
+                FROM dl_models_v2
+            """)
+            
+            result = cursor.fetchone()
+            last_training = result[0] if result and result[0] else datetime.now() - timedelta(days=30)
+            
+            # حساب الصفقات الجديدة
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM trades_history
+                WHERE action = 'SELL'
+                AND timestamp > %s
+            """, (last_training,))
+            
+            new_trades = cursor.fetchone()[0]
+            cursor.close()
+            
+            return new_trades
+            
+        except Exception as e:
+            print(f"⚠️ Error counting new trades: {e}")
+            return 0
+    
+    def run_continuous(self, interval_hours=6, trades_trigger=100):
+        """
+        Run training continuously
+        Triggers on: interval_hours OR trades_trigger (whichever comes first)
+        """
         print(f"\n🚀 Deep Learning Trainer V2 started (LightGBM)!")
-        print(f"⏰ Training interval: {interval_hours} hours")
+        print(f"⏰ Training triggers:")
+        print(f"   • Every {interval_hours} hours")
+        print(f"   • Every {trades_trigger} new trades")
         print("="*60)
+        
+        last_training_time = datetime.now()
+        last_trade_count = 0
         
         while True:
             try:
                 current_time = datetime.now().strftime("%H:%M:%S")
-                print(f"\n{'='*60}")
-                print(f"⏰ {current_time}")
-                print(f"{'='*60}")
                 
-                success = self.train_all_models()
+                # فحص الوقت
+                hours_since_training = (datetime.now() - last_training_time).total_seconds() / 3600
                 
-                if success:
-                    print(f"\n✅ Training successful")
+                # فحص الصفقات الجديدة
+                new_trades = self.get_new_trades_count()
+                new_trades_since_last = new_trades - last_trade_count
+                
+                # قرار التدريب
+                should_train = False
+                trigger_reason = ""
+                
+                if hours_since_training >= interval_hours:
+                    should_train = True
+                    trigger_reason = f"{interval_hours} hours passed"
+                elif new_trades_since_last >= trades_trigger:
+                    should_train = True
+                    trigger_reason = f"{new_trades_since_last} new trades"
+                
+                if should_train:
+                    print(f"\n{'='*60}")
+                    print(f"⏰ {current_time}")
+                    print(f"🎯 Training triggered: {trigger_reason}")
+                    print(f"{'='*60}")
+                    
+                    success = self.train_all_models()
+                    
+                    if success:
+                        print(f"\n✅ Training successful")
+                        last_training_time = datetime.now()
+                        last_trade_count = new_trades
+                    else:
+                        print(f"\n⚠️ Training skipped - not enough data")
+                    
+                    next_time_hours = (datetime.now() + timedelta(hours=interval_hours)).strftime("%H:%M:%S")
+                    print(f"\n⏰ Next check:")
+                    print(f"   • Time-based: {next_time_hours} ({interval_hours}h)")
+                    print(f"   • Trade-based: {trades_trigger - new_trades_since_last} trades remaining")
                 else:
-                    print(f"\n⚠️ Training skipped - not enough data")
+                    # طباعة حالة كل 30 دقيقة
+                    if int(hours_since_training * 60) % 30 == 0:
+                        print(f"⏳ {current_time} | Waiting... ({new_trades_since_last}/{trades_trigger} trades, {hours_since_training:.1f}/{interval_hours}h)")
                 
-                next_time = (datetime.now() + timedelta(hours=interval_hours)).strftime("%H:%M:%S")
-                print(f"\n⏰ Next training at: {next_time}")
-                time.sleep(interval_hours * 3600)
+                # فحص كل دقيقة
+                time.sleep(60)
             
             except KeyboardInterrupt:
                 print("\n🛑 Trainer stopped by user")
@@ -1202,8 +1281,8 @@ class DeepLearningTrainerXGBoost:
             except Exception as e:
                 print(f"❌ Error: {e}")
                 send_critical_alert("Training Loop Error", "Training loop encountered an error", str(e))
-                print(f"⏰ Retrying in 30 minutes...")
-                time.sleep(1800)
+                print(f"⏰ Retrying in 5 minutes...")
+                time.sleep(300)
 
 def main():
     if not ML_AVAILABLE:
@@ -1217,7 +1296,8 @@ def main():
         return
     
     trainer = DeepLearningTrainerXGBoost(database_url)
-    trainer.run_continuous(interval_hours=6)
+    # تدريب كل 6 ساعات أو كل 100 صفقة جديدة (أيهما أسرع)
+    trainer.run_continuous(interval_hours=6, trades_trigger=100)
 
 if __name__ == "__main__":
     main()
