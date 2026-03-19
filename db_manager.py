@@ -1,0 +1,227 @@
+"""
+🗄️ Database Manager
+Handles all PostgreSQL operations: connect, load, save.
+"""
+
+import json
+from datetime import datetime, timedelta
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse, unquote
+
+from alerts import send_critical_alert
+
+
+class DatabaseManager:
+    def __init__(self, database_url):
+        self.database_url = database_url
+        self.min_trades_for_training = 100
+        self.conn = self._connect_db()
+
+    # ========== Connection ==========
+
+    def _connect_db(self):
+        """Connect to PostgreSQL"""
+        try:
+            parsed = urlparse(self.database_url)
+            self._db_params = {
+                'host':            parsed.hostname,
+                'port':            parsed.port,
+                'database':        parsed.path[1:],
+                'user':            parsed.username,
+                'password':        unquote(parsed.password),
+                'sslmode':         'require',
+                'connect_timeout': 10
+            }
+            conn = psycopg2.connect(**self._db_params)
+            print("✅ Database: Connected (Supabase)")
+            return conn
+        except Exception as e:
+            print(f"❌ Database connection error: {e}")
+            send_critical_alert("Database Connection", "Failed to connect to database", str(e))
+            return None
+
+    def _get_conn(self):
+        """Return valid connection — reconnect if closed"""
+        try:
+            if self.conn.closed:
+                raise Exception("closed")
+            self.conn.cursor().execute("SELECT 1")
+        except Exception:
+            try:
+                self.conn = psycopg2.connect(**self._db_params)
+            except Exception as e:
+                print(f"❌ DB reconnect error: {e}")
+        return self.conn
+
+    # ========== Load ==========
+
+    def load_training_data(self):
+        """Load historical SELL trades for training"""
+        if not self.conn:
+            return None
+        try:
+            cursor = self._get_conn().cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT symbol, profit_percent, action, timestamp, data
+                FROM trades_history
+                WHERE action = 'SELL'
+                  AND data IS NOT NULL
+                ORDER BY timestamp ASC
+                LIMIT 2000
+            """)
+            trades = cursor.fetchall()
+            cursor.close()
+
+            if len(trades) < self.min_trades_for_training:
+                print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
+                return None
+
+            print(f"📊 Loaded {len(trades)} trades for training")
+            return trades
+        except Exception as e:
+            print(f"❌ Error loading data: {e}")
+            return None
+
+    def calculate_voting_accuracy(self, trades):
+        """حساب دقة تصويت المستشارين من جدول consultant_votes"""
+        print("\n🎯 Calculating voting accuracy from database...")
+        try:
+            conn   = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
+                FROM consultant_votes
+                WHERE timestamp > NOW() - INTERVAL '30 days'
+                GROUP BY consultant_name, vote_type, is_correct
+            """)
+            rows = cursor.fetchall()
+            cursor.close()
+
+            consultant_scores = {}
+            for row in rows:
+                name, vote_type, is_correct, count = row
+                if name not in consultant_scores:
+                    consultant_scores[name] = {
+                        'tp_correct': 0,     'tp_wrong': 0,
+                        'amount_correct': 0, 'amount_wrong': 0,
+                        'sl_correct': 0,     'sl_wrong': 0,
+                        'sell_correct': 0,   'sell_wrong': 0,
+                        'buy_correct': 0,    'buy_wrong': 0
+                    }
+                key = f"{vote_type}_{'correct' if is_correct else 'wrong'}"
+                consultant_scores[name][key] = count
+
+            final_scores = {}
+            for consultant, scores in consultant_scores.items():
+                tp_total     = scores['tp_correct']     + scores['tp_wrong']
+                amount_total = scores['amount_correct'] + scores['amount_wrong']
+                sl_total     = scores['sl_correct']     + scores['sl_wrong']
+                sell_total   = scores['sell_correct']   + scores['sell_wrong']
+                buy_total    = scores['buy_correct']    + scores['buy_wrong']
+
+                final_scores[consultant] = {
+                    'tp_accuracy':     scores['tp_correct']     / tp_total     if tp_total     > 0 else 0.5,
+                    'amount_accuracy': scores['amount_correct'] / amount_total if amount_total > 0 else 0.5,
+                    'sl_accuracy':     scores['sl_correct']     / sl_total     if sl_total     > 0 else 0.5,
+                    'sell_accuracy':   scores['sell_correct']   / sell_total   if sell_total   > 0 else 0.5,
+                    'buy_accuracy':    scores['buy_correct']    / buy_total    if buy_total    > 0 else 0.5,
+                    'overall_accuracy': (
+                        (scores['tp_correct'] + scores['amount_correct'] + scores['sl_correct'] +
+                         scores['sell_correct'] + scores['buy_correct']) /
+                        max(tp_total + amount_total + sl_total + sell_total + buy_total, 1)
+                    )
+                }
+
+            if final_scores:
+                print(f"✅ Loaded voting accuracy for {len(final_scores)} consultants:")
+                for name, s in final_scores.items():
+                    print(f"   • {name}: Overall {s['overall_accuracy']*100:.1f}% | "
+                          f"Buy {s['buy_accuracy']*100:.1f}% | Sell {s['sell_accuracy']*100:.1f}%")
+            else:
+                print("⚠️ No voting data found yet (table is new)")
+
+            return final_scores
+
+        except Exception as e:
+            print(f"⚠️ Error calculating voting accuracy: {e}")
+            return {}
+
+    # ========== Save ==========
+
+    def save_models_to_db(self, model_names, results, retry=3):
+        """Save model accuracy info to dl_models_v2 table"""
+        if not self.conn:
+            print("⚠️ No database connection - models saved to files only")
+            return False
+
+        for attempt in range(retry):
+            try:
+                print(f"🔄 Attempt {attempt+1}/{retry}: Saving to database...")
+                conn   = self._get_conn()
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS dl_models_v2 (
+                        id         SERIAL PRIMARY KEY,
+                        model_name VARCHAR(50)  NOT NULL,
+                        model_type VARCHAR(50)  NOT NULL,
+                        accuracy   FLOAT,
+                        trained_at TIMESTAMP    DEFAULT NOW(),
+                        status     VARCHAR(20)  DEFAULT 'active'
+                    )
+                """)
+                conn.commit()
+
+                cursor.execute("DELETE FROM dl_models_v2")
+                conn.commit()
+
+                for model_name in model_names:
+                    accuracy = results.get(f'{model_name}_accuracy', 0)
+                    cursor.execute("""
+                        INSERT INTO dl_models_v2 (model_name, model_type, accuracy)
+                        VALUES (%s, %s, %s)
+                    """, (model_name, 'LightGBM', float(accuracy)))
+
+                conn.commit()
+                cursor.close()
+                print("✅ Models info saved to database (dl_models_v2)")
+                return True
+
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                if attempt < retry - 1:
+                    import time
+                    time.sleep(2)
+
+        return False
+
+    def get_new_trades_count(self):
+        """عدد الصفقات الجديدة منذ آخر تدريب"""
+        try:
+            conn   = self._get_conn()
+            if not conn:
+                return 0
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT MAX(trained_at) FROM dl_models_v2")
+            result        = cursor.fetchone()
+            last_training = result[0] if result and result[0] else datetime.now() - timedelta(days=30)
+
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM trades_history
+                WHERE action = 'SELL'
+                  AND timestamp > %s
+            """, (last_training,))
+            new_trades = cursor.fetchone()[0]
+            cursor.close()
+            return new_trades
+
+        except Exception as e:
+            print(f"⚠️ Error counting new trades: {e}")
+            return 0
