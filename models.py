@@ -300,3 +300,40 @@ def train_chart_cnn_model(trades, voting_scores=None):
     model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=150, max_depth=6, learning_rate=0.08)
     print(f"📊 Chart Pattern Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
+
+
+def train_rescue_model(trades, voting_scores=None):
+    """🤪 Train Rescue Scalper (The Crazy Jester)"""
+    print("\n🤪 Training Rescue Model (LightGBM)...")
+    # لا نحتاج تصويت المستشارين هنا، الخبل يعمل منفرداً
+
+    def features(data, trade):
+        return [
+            data.get('rsi', 50),          data.get('macd', 0),
+            data.get('volume_ratio', 1),  data.get('price_momentum', 0),
+            data.get('atr', 1),           data.get('ema_crossover', 0),
+            data.get('bid_ask_spread', 0), data.get('volume_trend', 0),
+        ]
+
+    # تصفية الصفقات: نتدرب فقط على صفقات الإنقاذ أو الزومبي
+    rescue_trades = []
+    for t in trades:
+        data = t.get('data', {})
+        if isinstance(data, str): data = json.loads(data)
+        
+        # محاولة اكتشاف صفقة إنقاذ من البيانات أو السبب (إذا توفر)
+        # بما أن السبب قد لا يكون متاحاً دائماً في الـ data blob، نعتمد على المنطق التقريبي
+        # أو إذا كانت hours_held > 70 (إذا توفرت المعلومة)
+        # هنا سنفترض أننا نمرر كل الصفقات وسيتعلم هو الأنماط الناجحة للخروج من مواقف صعبة
+        # لكن لزيادة الدقة، يفضل وجود flag. حالياً سندربه على الخروج الذكي بشكل عام.
+        rescue_trades.append(t)
+
+    fl, ll = _build_dataset(rescue_trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0 else 0)
+    
+    if len(fl) < 20: # نقبل ببيانات أقل لهذا الموديل في البداية
+        print("⚠️ Not enough data for Rescue Model yet")
+        return None
+
+    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=100, max_depth=4, learning_rate=0.05)
+    print(f"🤪 Rescue Model: Accuracy {accuracy*100:.2f}%")
+    return model, accuracy
