@@ -19,6 +19,7 @@ from models import (
     train_pattern_model,
     train_liquidity_model,
     train_chart_cnn_model,
+    train_rescue_model,
 )
 
 # Ordered list: AI Brain first, then consultants
@@ -31,6 +32,7 @@ TRAIN_PIPELINE = [
     ('pattern',     train_pattern_model),
     ('liquidity',   train_liquidity_model),
     ('chart_cnn',   train_chart_cnn_model),
+    ('rescue',      train_rescue_model), # 🤪 Added The Jester
 ]
 
 
@@ -38,14 +40,14 @@ class DeepLearningTrainerXGBoost:
     def __init__(self, database_url):
         self.db     = DatabaseManager(database_url)
         self.models = {name: None for name, _ in TRAIN_PIPELINE}
-        print("🧠 Deep Learning Trainer V2 initialized (8 Models - LightGBM)")
+        print("🧠 Deep Learning Trainer V2 initialized (9 Models - LightGBM)")
 
     # ========== Training ==========
 
     def train_all_models(self):
         """Train all 8 models sequentially"""
         print("\n" + "=" * 60)
-        print("👑 Starting Training - 8 LightGBM Models")
+        print("👑 Starting Training - 9 LightGBM Models")
         print("=" * 60)
 
         trades = self.db.load_training_data()
@@ -75,7 +77,7 @@ class DeepLearningTrainerXGBoost:
         self.save_all_models()
         self.db.save_models_to_db(list(self.models.keys()), results)
 
-        print("\n✅ All 8 LightGBM models trained successfully!")
+        print("\n✅ All 9 LightGBM models trained successfully!")
         return True
 
     def save_all_models(self):
