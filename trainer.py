@@ -104,19 +104,11 @@ class DeepLearningTrainerXGBoost:
         print(f"   • Every {trades_trigger} new trades")
         print("=" * 60)
 
-        # تهيئة جدول heartbeat
-        self.db.init_trainer_heartbeat()
-
         last_training_time = datetime.now()
         last_trade_count   = 0
-        heartbeat_counter  = 0
 
         while True:
             try:
-                heartbeat_counter += 1
-                # نبضة كل 30 ثانية (كل 30 دورة × 1 ثانية)
-                if heartbeat_counter == 1 or heartbeat_counter % 30 == 0:
-                    self.db.save_trainer_heartbeat()
                 current_time        = datetime.now().strftime("%H:%M:%S")
                 hours_since         = (datetime.now() - last_training_time).total_seconds() / 3600
                 new_trades          = self.db.get_new_trades_count()
