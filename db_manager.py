@@ -225,3 +225,49 @@ class DatabaseManager:
         except Exception as e:
             print(f"⚠️ Error counting new trades: {e}")
             return 0
+
+    # ========== Trainer Heartbeat ==========
+
+    def init_trainer_heartbeat(self):
+        """إنشاء جدول heartbeat للتدريب"""
+        try:
+            conn   = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trainer_heartbeat (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    last_beat TIMESTAMP DEFAULT NOW(),
+                    status VARCHAR(20) DEFAULT 'RUNNING',
+                    status_message_id VARCHAR(50) DEFAULT NULL
+                )
+            """)
+            cursor.execute("""
+                ALTER TABLE trainer_heartbeat
+                ADD COLUMN IF NOT EXISTS status_message_id VARCHAR(50) DEFAULT NULL
+            """)
+            cursor.execute("""
+                INSERT INTO trainer_heartbeat (id, last_beat, status)
+                VALUES (1, NOW(), 'RUNNING')
+                ON CONFLICT (id) DO NOTHING
+            """)
+            conn.commit()
+            cursor.close()
+            print("✅ trainer_heartbeat table ready")
+        except Exception as e:
+            print(f"⚠️ Trainer heartbeat init error: {e}")
+
+    def save_trainer_heartbeat(self):
+        """كتابة نبضة سكريبت التدريب"""
+        try:
+            conn   = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO trainer_heartbeat (id, last_beat, status)
+                VALUES (1, NOW(), 'RUNNING')
+                ON CONFLICT (id) DO UPDATE
+                SET last_beat = NOW(), status = 'RUNNING'
+            """)
+            conn.commit()
+            cursor.close()
+        except Exception as e:
+            print(f"⚠️ Trainer heartbeat error: {e}")
