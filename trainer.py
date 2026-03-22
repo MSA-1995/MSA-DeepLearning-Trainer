@@ -8,6 +8,7 @@ import pickle
 import time
 from datetime import datetime, timedelta
 
+from database import get_db_connection, close_db_connection
 from db_manager import DatabaseManager
 from alerts import send_critical_alert
 from models import (
@@ -37,8 +38,8 @@ TRAIN_PIPELINE = [
 
 
 class DeepLearningTrainerXGBoost:
-    def __init__(self, database_url):
-        self.db     = DatabaseManager(database_url)
+    def __init__(self):
+        self.db     = DatabaseManager()
         self.models = {name: None for name, _ in TRAIN_PIPELINE}
         print("🧠 Deep Learning Trainer V2 initialized (9 Models - LightGBM)")
 
