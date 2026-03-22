@@ -3,6 +3,7 @@
 """
 
 import os
+from config import STATUS_STORAGE_METHOD
 import base64
 from datetime import datetime
 
@@ -105,38 +106,85 @@ STATUS_MESSAGE_ID_FILE = os.path.join(os.path.dirname(__file__), 'trainer_status
 STARTUP_TIME = None
 
 def load_status_message_id():
-    """Load the status message ID from file."""
+    """Load the status message ID from the configured storage (db or file)."""
     global STATUS_MESSAGE_ID
-    if not os.path.exists(STATUS_MESSAGE_ID_FILE):
-        print("🤔 No Trainer status message ID file found. A new one will be created.")
-        STATUS_MESSAGE_ID = None
-        return
-    try:
-        with open(STATUS_MESSAGE_ID_FILE, 'r') as f:
-            STATUS_MESSAGE_ID = f.read().strip()
-            if STATUS_MESSAGE_ID:
-                print(f"✅ Loaded Trainer status message ID: {STATUS_MESSAGE_ID}")
+    if STATUS_STORAGE_METHOD == 'database':
+        from database import get_db_connection, close_db_connection
+        conn = get_db_connection()
+        if not conn:
+            STATUS_MESSAGE_ID = None
+            return
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM bot_settings WHERE key = 'trainer_status_message_id'")
+            row = cursor.fetchone()
+            if row and row[0]:
+                STATUS_MESSAGE_ID = row[0]
+                print(f"✅ Loaded Trainer status message ID from database: {STATUS_MESSAGE_ID}")
             else:
-                print("🤔 Status message ID file is empty. A new one will be created.")
-    except Exception as e:
-        print(f"❌ Error loading Trainer status message ID from file: {e}")
-        STATUS_MESSAGE_ID = None
+                print("🤔 No Trainer status message ID found in database. A new one will be created.")
+                STATUS_MESSAGE_ID = None
+            cursor.close()
+        except Exception as e:
+            print(f"❌ Error loading Trainer status message ID from database: {e}")
+            STATUS_MESSAGE_ID = None
+        finally:
+            close_db_connection(conn)
+    else: # file method
+        if not os.path.exists(STATUS_MESSAGE_ID_FILE):
+            print("🤔 No Trainer status message ID file found. A new one will be created.")
+            STATUS_MESSAGE_ID = None
+            return
+        try:
+            with open(STATUS_MESSAGE_ID_FILE, 'r') as f:
+                STATUS_MESSAGE_ID = f.read().strip()
+                if STATUS_MESSAGE_ID:
+                    print(f"✅ Loaded Trainer status message ID from file: {STATUS_MESSAGE_ID}")
+                else:
+                    print("🤔 Status message ID file is empty. A new one will be created.")
+                    STATUS_MESSAGE_ID = None
+        except Exception as e:
+            print(f"❌ Error loading Trainer status message ID from file: {e}")
+            STATUS_MESSAGE_ID = None
 
 def save_status_message_id(message_id):
-    """Save the status message ID to file."""
+    """Save the status message ID to the configured storage (db or file)."""
     global STATUS_MESSAGE_ID
-    try:
-        # Ensure the directory exists
-        os.makedirs(os.path.dirname(STATUS_MESSAGE_ID_FILE), exist_ok=True)
-        with open(STATUS_MESSAGE_ID_FILE, 'w') as f:
-            f.write(str(message_id) if message_id else '')
-        STATUS_MESSAGE_ID = str(message_id) if message_id else None
-        if message_id:
-            print(f"💾 Saved Trainer status message ID to file: {message_id}")
-        else:
-            print("📝 Cleared Trainer status message ID file.")
-    except Exception as e:
-        print(f"❌ Error saving Trainer status message ID to file: {e}")
+    if STATUS_STORAGE_METHOD == 'database':
+        from database import get_db_connection, close_db_connection
+        conn = get_db_connection()
+        if not conn:
+            return
+        try:
+            cursor = conn.cursor()
+            # Ensure the table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bot_settings (
+                    key VARCHAR(255) PRIMARY KEY,
+                    value TEXT
+                );
+            """)
+            cursor.execute("INSERT INTO bot_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", ('trainer_status_message_id', str(message_id)))
+            conn.commit()
+            STATUS_MESSAGE_ID = str(message_id)
+            print(f"💾 Saved Trainer status message ID to database: {message_id}")
+            cursor.close()
+        except Exception as e:
+            print(f"❌ Error saving Trainer status message ID to database: {e}")
+        finally:
+            close_db_connection(conn)
+    else: # file method
+        try:
+            os.makedirs(os.path.dirname(STATUS_MESSAGE_ID_FILE), exist_ok=True)
+            with open(STATUS_MESSAGE_ID_FILE, 'w') as f:
+                f.write(str(message_id) if message_id else '')
+            STATUS_MESSAGE_ID = str(message_id) if message_id else None
+            if message_id:
+                print(f"💾 Saved Trainer status message ID to file: {message_id}")
+            else:
+                print("📝 Cleared Trainer status message ID file.")
+        except Exception as e:
+            print(f"❌ Error saving Trainer status message ID to file: {e}")
 
 def send_status_embed(title, fields, color='blue', message_id=None):
     """Send or edit a status embed message on Discord. This is a specialized version.
