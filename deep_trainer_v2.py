@@ -49,7 +49,20 @@ for _env_file in [
         pass
 
 # ========== MAIN ==========
+import threading
+import time
 from trainer import DeepLearningTrainerXGBoost
+from alerts import send_startup_notification, send_heartbeat_notification
+
+def heartbeat_loop():
+    """Periodically send a heartbeat notification."""
+    while True:
+        try:
+            send_heartbeat_notification()
+        except Exception as e:
+            print(f"❌ Error in heartbeat loop: {e}")
+        time.sleep(60) # Wait for 60 seconds
+
 
 
 def main():
@@ -64,4 +77,15 @@ def main():
 
 
 if __name__ == "__main__":
+    # --- Send Startup Notification ---
+    try:
+        send_startup_notification()
+    except Exception as e:
+        print(f"❌ Failed to send startup notification: {e}")
+
+    # --- Start Heartbeat Thread ---
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+
+    # --- Run Main Application ---
     main()
