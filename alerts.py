@@ -25,26 +25,52 @@ except ImportError:
 
 ENCRYPTED_CRITICAL_WEBHOOK = "gAAAAABpvbaL8kNDyeRc6l4srWXmt0hIWOVPgNrHhBU4Tk6NR5h0rm5_02lY_xYMXKYmQiNrkh0T3G5hjD87eE1-8zv6glgmmLoHlqvRMjrhBP0zVy2eoYOVyNsUUBaU-NmQs6pRDxZQhOpDOSkh_elQccWtsKwGfMONzEQ8_3vhZh0pagJgT_C7g4Qd6qxaePhIUSjMhr7iNKlKqwiXPP_1fs7UeaY_xfeU7I9mJc2Sv2OHLTEc9SE="
 
+# Master key for password encryption (must match trading bot)
+_MASTER_KEY = base64.urlsafe_b64encode(b'MSA_TRADING_BOT_2026_SECRET_KEY!')
+_MASTER_CIPHER = Fernet(_MASTER_KEY)
 
 def get_encryption_key():
-    """Get encryption key from environment or .env file"""
+    """Get encryption key - supports Fernet encrypted password (Mirrors trading bot logic)"""
+    # Try Environment Variable first
     encrypted_key = os.getenv('ENCRYPTION_KEY')
-    if not encrypted_key:
-        for env_file in [
-            '/home/container/DeepLearningTrainer_XGBoost/.env',
-            '/home/container/.env'
-        ]:
+    
+    if encrypted_key:
+        try:
+            # Try to decrypt with Fernet (strong encryption, for server)
+            decrypted = _MASTER_CIPHER.decrypt(encrypted_key.encode()).decode()
+            print("✅ Encryption key loaded from environment variable (Fernet decrypted)")
+            return decrypted
+        except:
+            # Fallback: try base64 (old method)
             try:
-                with open(env_file) as f:
-                    for line in f:
-                        if line.startswith('ENCRYPTION_KEY='):
-                            encrypted_key = line.strip().split('=', 1)[1]
-                            break
-                if encrypted_key:
-                    break
+                decoded = base64.b64decode(encrypted_key).decode()
+                print("✅ Encryption key loaded from environment variable (base64 decoded)")
+                return decoded
             except:
-                pass
-    return encrypted_key
+                # Use as-is (plain text, for local .env)
+                print("✅ Encryption key loaded from environment variable (plain text)")
+                return encrypted_key
+    
+    # Fallback to flash drive (for local development)
+    key_file = r"D:\bot_keys.txt"
+    try:
+        if os.path.exists(key_file):
+            with open(key_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                if len(lines) >= 3:
+                    key = lines[2].strip()
+                    if key:
+                        print("✅ Encryption key loaded from flash drive")
+                        return key
+            print("⚠️ Flash drive key file is invalid or key is empty.")
+            return None
+        else:
+            # This is not an error, just info.
+            print("ℹ️ Flash drive not found. This is normal on a server.")
+            return None
+    except Exception as e:
+        print(f"❌ Error reading encryption key from flash drive: {e}")
+        return None
 
 
 def get_critical_webhook():
