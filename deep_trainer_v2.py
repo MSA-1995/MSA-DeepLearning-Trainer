@@ -97,12 +97,7 @@ def heartbeat_loop():
 
 
 def main():
-    database_url = os.getenv('DATABASE_URL')
-    if not database_url:
-        print("❌ DATABASE_URL not found!")
-        return
-
-    trainer = DeepLearningTrainerXGBoost(database_url)
+    trainer = DeepLearningTrainerXGBoost()
     # Train every 6 hours OR every 100 new trades (whichever comes first)
     trainer.run_continuous(interval_hours=6, trades_trigger=100)
 
