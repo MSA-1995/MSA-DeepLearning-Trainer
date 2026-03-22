@@ -8,61 +8,30 @@ from datetime import datetime, timedelta
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from urllib.parse import urlparse, unquote
 
 from alerts import send_critical_alert
+from database import get_db_connection, close_db_connection
 
 
 class DatabaseManager:
-    def __init__(self, database_url):
-        self.database_url = database_url
+    def __init__(self):
         self.min_trades_for_training = 100
-        self.conn = self._connect_db()
 
     # ========== Connection ==========
 
-    def _connect_db(self):
-        """Connect to PostgreSQL"""
-        try:
-            parsed = urlparse(self.database_url)
-            self._db_params = {
-                'host':            parsed.hostname,
-                'port':            parsed.port,
-                'database':        parsed.path[1:],
-                'user':            parsed.username,
-                'password':        unquote(parsed.password),
-                'sslmode':         'require',
-                'connect_timeout': 10
-            }
-            conn = psycopg2.connect(**self._db_params)
-            print("✅ Database: Connected (Supabase)")
-            return conn
-        except Exception as e:
-            print(f"❌ Database connection error: {e}")
-            send_critical_alert("Database Connection", "Failed to connect to database", str(e))
-            return None
-
     def _get_conn(self):
-        """Return valid connection — reconnect if closed"""
-        try:
-            if self.conn.closed:
-                raise Exception("closed")
-            self.conn.cursor().execute("SELECT 1")
-        except Exception:
-            try:
-                self.conn = psycopg2.connect(**self._db_params)
-            except Exception as e:
-                print(f"❌ DB reconnect error: {e}")
-        return self.conn
+        """Return valid connection"""
+        return get_db_connection()
 
     # ========== Load ==========
 
     def load_training_data(self):
         """Load historical SELL trades for training"""
-        if not self.conn:
+        conn = self._get_conn()
+        if not conn:
             return None
         try:
-            cursor = self._get_conn().cursor(cursor_factory=RealDictCursor)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute("""
                 SELECT symbol, profit_percent, action, timestamp, data
                 FROM trades_history
@@ -73,6 +42,8 @@ class DatabaseManager:
             """)
             trades = cursor.fetchall()
             cursor.close()
+            close_db_connection(conn)
+            close_db_connection(conn)
 
             if len(trades) < self.min_trades_for_training:
                 print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
@@ -82,6 +53,7 @@ class DatabaseManager:
             return trades
         except Exception as e:
             print(f"❌ Error loading data: {e}")
+            close_db_connection(conn)
             return None
 
     def calculate_voting_accuracy(self, trades):
@@ -89,6 +61,8 @@ class DatabaseManager:
         print("\n🎯 Calculating voting accuracy from database...")
         try:
             conn   = self._get_conn()
+            if not conn:
+                return {}
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
@@ -146,20 +120,22 @@ class DatabaseManager:
 
         except Exception as e:
             print(f"⚠️ Error calculating voting accuracy: {e}")
+            close_db_connection(conn)
             return {}
 
     # ========== Save ==========
 
     def save_models_to_db(self, model_names, results, retry=3):
         """Save model accuracy info to dl_models_v2 table"""
-        if not self.conn:
+        conn = self._get_conn()
+        if not conn:
             print("⚠️ No database connection - models saved to files only")
-            return False
+            close_db_connection(conn)
+        return False
 
         for attempt in range(retry):
             try:
                 print(f"🔄 Attempt {attempt+1}/{retry}: Saving to database...")
-                conn   = self._get_conn()
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -186,6 +162,7 @@ class DatabaseManager:
 
                 conn.commit()
                 cursor.close()
+                close_db_connection(conn)
                 print("✅ Models info saved to database (dl_models_v2)")
                 return True
 
@@ -220,8 +197,10 @@ class DatabaseManager:
             """, (last_training,))
             new_trades = cursor.fetchone()[0]
             cursor.close()
+            close_db_connection(conn)
             return new_trades
 
         except Exception as e:
             print(f"⚠️ Error counting new trades: {e}")
+            close_db_connection(conn)
             return 0
