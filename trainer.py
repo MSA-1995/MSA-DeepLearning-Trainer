@@ -94,7 +94,8 @@ class DeepLearningTrainerXGBoost:
 
 
         self.save_all_models()
-        self.db.save_models_to_db(list(self.models.keys()), results)
+        # نمرر قاموس الموديلات بالكامل (الاسم + الكائن) ليتم حفظه
+        self.db.save_models_to_db(self.models, results)
 
         print("\n✅ All 10 LightGBM models trained successfully!")
         return True
