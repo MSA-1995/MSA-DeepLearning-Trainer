@@ -44,6 +44,66 @@ def _train_lgb(X, y, n_estimators=100, max_depth=5, learning_rate=0.1):
     return model, accuracy
 
 
+def train_meta_learner_model(trades, trained_models):
+    """👑🧠 Train the Meta-Learner (The New King)
+     يتعلم من قرارات المستشارين الآخرين لاتخاذ قرار نهائي أكثر ذكاءً
+    """
+    print("\n👑🧠 Training Meta-Learner Model (The New King)...")
+
+    if not trained_models or len(trained_models) < 7:
+        print("⚠️ Not enough trained consultant models to train the Meta-Learner.")
+        return None
+
+    # 1. بناء مجموعة بيانات جديدة من آراء المستشارين
+    meta_features = []
+    final_labels = []
+
+    # استبعاد الملك الجديد نفسه من قائمة المستشارين للمدخلات
+    consultant_models = {k: v for k, v in trained_models.items() if k != 'meta_learner' and v is not None}
+
+    for trade in trades:
+        try:
+            data = trade.get('data', {})
+            if isinstance(data, str):
+                data = json.loads(data)
+
+            # الحصول على آراء (توقعات) كل مستشار لهذه الصفقة
+            consultant_opinions = []
+            for model_name, model in consultant_models.items():
+                # نحتاج إلى بناء نفس الميزات التي تدرب عليها كل مستشار
+                # هذه عملية معقدة، سنقوم بتبسيطها الآن بالاعتماد على النقاط المسجلة مباشرة
+                # إذا كانت النقاط غير موجودة، سنستخدم 0 كقيمة افتراضية
+                opinion = data.get(f'{model_name}_score', 0) 
+                consultant_opinions.append(opinion)
+            
+            # أضف رأي المستشارين كـ "ميزات" للملك الجديد
+            meta_features.append(consultant_opinions)
+            
+            # الهدف: هل الصفقة كانت ناجحة؟
+            final_labels.append(1 if float(trade.get('profit_percent', 0)) > 0.8 else 0)
+
+        except Exception as e:
+            # print(f"Skipping trade for Meta-Learner due to error: {e}")
+            continue
+
+    if len(meta_features) < 100:
+        print(f"⚠️ Not enough data for Meta-Learner ({len(meta_features)} trades found)")
+        return None
+
+    # 2. تدريب الملك الجديد
+    # نستخدم مصنف أقوى قليلاً لأنه يتعلم من بيانات معقدة
+    model, accuracy = _train_lgb(
+        np.array(meta_features),
+        np.array(final_labels),
+        n_estimators=300, 
+        max_depth=4, # عمق أقل لتجنب الحفظ الزائد (Overfitting)
+        learning_rate=0.03
+    )
+    
+    print(f"👑🧠 Meta-Learner Model: Accuracy {accuracy*100:.2f}%")
+    return model, accuracy
+
+
 # ========== Models ==========
 
 def train_ai_brain_model(trades, voting_scores=None):
