@@ -126,7 +126,7 @@ class DatabaseManager:
     # ========== Save ==========
 
     def save_models_to_db(self, models, results, retry=3):
-        """Save model accuracy info to dl_models_v2 table"""
+        """Save model accuracy info to dl_models_v2 table using a safe, non-destructive approach."""
         conn = self._get_conn()
         if not conn:
             print("⚠️ No database connection - models saved to files only")
@@ -134,48 +134,66 @@ class DatabaseManager:
 
         for attempt in range(retry):
             try:
-                print(f"🔄 Attempt {attempt+1}/{retry}: Saving to database...")
-                cursor = conn.cursor()
-
-                # نستخدم DROP لإعادة بناء الجدول مع العمود الجديد للبيانات
-                cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS dl_models_v2 (
-                        id         SERIAL PRIMARY KEY,
-                        model_name VARCHAR(50)  NOT NULL,
-                        model_type VARCHAR(50)  NOT NULL,
-                        model_data BYTEA,
-                        accuracy   FLOAT,
-                        trained_at TIMESTAMP    DEFAULT NOW(),
-                        status     VARCHAR(20)  DEFAULT 'active'
-                    )
-                """)
-                conn.commit()
-
-                for model_name, model in models.items():
-                    if model is None: continue
-                    accuracy = results.get(f'{model_name}_accuracy', 0)
-                    model_bytes = pickle.dumps(model)
+                print(f"🔄 Attempt {attempt+1}/{retry}: Saving models to database...")
+                with conn.cursor() as cursor:
+                    # Step 1: Create the table if it doesn't already exist.
                     cursor.execute("""
-                        INSERT INTO dl_models_v2 (model_name, model_type, model_data, accuracy)
-                        VALUES (%s, %s, %s, %s)
-                    """, (model_name, 'LightGBM', psycopg2.Binary(model_bytes), float(accuracy)))
+                        CREATE TABLE IF NOT EXISTS dl_models_v2 (
+                            id         SERIAL PRIMARY KEY,
+                            model_name VARCHAR(50)  NOT NULL,
+                            model_type VARCHAR(50)  NOT NULL,
+                            accuracy   FLOAT,
+                            trained_at TIMESTAMP    DEFAULT NOW(),
+                            status     VARCHAR(20)  DEFAULT 'active'
+                        );
+                    """)
+                    # Step 2: Add the 'model_data' column if it doesn't exist. This is a safe way to migrate.
+                    cursor.execute("ALTER TABLE dl_models_v2 ADD COLUMN IF NOT EXISTS model_data BYTEA;")
 
+                    # Step 3: Clear only the old models, leaving the table structure intact.
+                    cursor.execute("DELETE FROM dl_models_v2;")
+
+                    # Step 4: Insert the newly trained models.
+                    for model_name, model in models.items():
+                        if model is None:
+                            continue
+                        accuracy = results.get(f'{model_name}_accuracy', 0)
+                        model_bytes = pickle.dumps(model)
+                        cursor.execute("""
+                            INSERT INTO dl_models_v2 (model_name, model_type, model_data, accuracy)
+                            VALUES (%s, %s, %s, %s);
+                        """, (model_name, 'LightGBM', psycopg2.Binary(model_bytes), float(accuracy)))
+
+                # Commit all changes (schema and data) in a single transaction.
                 conn.commit()
-                cursor.close()
-                close_db_connection(conn)
                 print("✅ Models info saved to database (dl_models_v2)")
+                close_db_connection(conn)
                 return True
 
             except Exception as e:
-                try:
-                    conn.rollback()
-                except:
-                    pass
+                print(f"❌ Error on attempt {attempt+1}: {e}")
+                if conn:
+                    try:
+                        conn.rollback()
+                        print("  - Transaction has been rolled back.")
+                    except Exception as rb_e:
+                        print(f"  - Additionally, failed to rollback transaction: {rb_e}")
+
                 if attempt < retry - 1:
                     import time
-                    time.sleep(2)
-
+                    print("  - Retrying in 3 seconds...")
+                    time.sleep(3)
+                    # Re-establish connection for the next attempt
+                    close_db_connection(conn)
+                    conn = self._get_conn()
+                    if not conn:
+                        print("⚠️ Could not re-establish DB connection for retry. Aborting.")
+                        return False
+                else:
+                    print("❌ Max retries reached. Failed to save models to database.")
+                    break # Exit loop
+        
+        close_db_connection(conn)
         return False
 
     def get_new_trades_count(self):
