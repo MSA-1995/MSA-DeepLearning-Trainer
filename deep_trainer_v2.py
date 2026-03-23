@@ -98,8 +98,8 @@ def heartbeat_loop():
 
 def main():
     trainer = DeepLearningTrainerXGBoost()
-    # Train every 6 hours OR every 100 new trades (whichever comes first)
-    trainer.run_continuous(interval_hours=6, trades_trigger=100)
+    # Train immediately, then every 6 hours.
+    trainer.run_continuous(interval_hours=6)
 
 
 if __name__ == "__main__":
