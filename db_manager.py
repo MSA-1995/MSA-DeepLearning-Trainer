@@ -43,7 +43,6 @@ class DatabaseManager:
             trades = cursor.fetchall()
             cursor.close()
             close_db_connection(conn)
-            close_db_connection(conn)
 
             if len(trades) < self.min_trades_for_training:
                 print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
@@ -130,8 +129,7 @@ class DatabaseManager:
         conn = self._get_conn()
         if not conn:
             print("⚠️ No database connection - models saved to files only")
-            close_db_connection(conn)
-        return False
+            return False
 
         for attempt in range(retry):
             try:
