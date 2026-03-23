@@ -4,6 +4,7 @@ Handles all PostgreSQL operations: connect, load, save.
 """
 
 import json
+import pickle
 from datetime import datetime, timedelta
 
 import psycopg2
@@ -124,7 +125,7 @@ class DatabaseManager:
 
     # ========== Save ==========
 
-    def save_models_to_db(self, model_names, results, retry=3):
+    def save_models_to_db(self, models, results, retry=3):
         """Save model accuracy info to dl_models_v2 table"""
         conn = self._get_conn()
         if not conn:
@@ -136,11 +137,14 @@ class DatabaseManager:
                 print(f"🔄 Attempt {attempt+1}/{retry}: Saving to database...")
                 cursor = conn.cursor()
 
+                # نستخدم DROP لإعادة بناء الجدول مع العمود الجديد للبيانات
+                cursor.execute("DROP TABLE IF EXISTS dl_models_v2")
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS dl_models_v2 (
                         id         SERIAL PRIMARY KEY,
                         model_name VARCHAR(50)  NOT NULL,
                         model_type VARCHAR(50)  NOT NULL,
+                        model_data BYTEA,
                         accuracy   FLOAT,
                         trained_at TIMESTAMP    DEFAULT NOW(),
                         status     VARCHAR(20)  DEFAULT 'active'
@@ -148,15 +152,14 @@ class DatabaseManager:
                 """)
                 conn.commit()
 
-                cursor.execute("DELETE FROM dl_models_v2")
-                conn.commit()
-
-                for model_name in model_names:
+                for model_name, model in models.items():
+                    if model is None: continue
                     accuracy = results.get(f'{model_name}_accuracy', 0)
+                    model_bytes = pickle.dumps(model)
                     cursor.execute("""
-                        INSERT INTO dl_models_v2 (model_name, model_type, accuracy)
-                        VALUES (%s, %s, %s)
-                    """, (model_name, 'LightGBM', float(accuracy)))
+                        INSERT INTO dl_models_v2 (model_name, model_type, model_data, accuracy)
+                        VALUES (%s, %s, %s, %s)
+                    """, (model_name, 'LightGBM', psycopg2.Binary(model_bytes), float(accuracy)))
 
                 conn.commit()
                 cursor.close()
