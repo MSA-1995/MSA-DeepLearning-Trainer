@@ -12,7 +12,6 @@ from database import get_db_connection, close_db_connection
 from db_manager import DatabaseManager
 from alerts import send_critical_alert
 from models import (
-    train_ai_brain_model,
     train_smart_money_model,
     train_risk_model,
     train_anomaly_model,
@@ -24,9 +23,8 @@ from models import (
     train_meta_learner_model, # 👑🧠 The New King!
 )
 
-# Ordered list: AI Brain first, then consultants
+# Ordered list of consultants for the king to learn from
 TRAIN_PIPELINE = [
-    ('ai_brain',    train_ai_brain_model),
     ('smart_money', train_smart_money_model),
     ('risk',        train_risk_model),
     ('anomaly',     train_anomaly_model),
@@ -43,14 +41,14 @@ class DeepLearningTrainerXGBoost:
     def __init__(self):
         self.db     = DatabaseManager()
         self.models = {name: None for name, _ in TRAIN_PIPELINE}
-        print("🧠 Deep Learning Trainer V2 initialized (10 Models - LightGBM)")
+        print("🧠 Deep Learning Trainer V2 initialized (LightGBM)")
 
     # ========== Training ==========
 
     def train_all_models(self):
         """Train all models sequentially, with Meta-Learner at the end."""
         print("\n" + "=" * 60)
-        print("👑 Starting Training - 10 LightGBM Models")
+        print("👑 Starting Training - 9 LightGBM Models")
         print("=" * 60)
 
         trades = self.db.load_training_data()
@@ -83,9 +81,9 @@ class DeepLearningTrainerXGBoost:
                 if model_name == 'ai_brain':
                     send_critical_alert("Model Training Error", "AI Brain failed to train", str(e))
 
-        # Now, train the Meta-Learner using the trained consultants
+        # Now, train the Meta-Learner using the trained consultants and the db manager
         try:
-            meta_result = train_meta_learner_model(trades, trained_consultants)
+            meta_result = train_meta_learner_model(self.db, trained_consultants)
             if meta_result:
                 self.models['meta_learner'], results['meta_learner_accuracy'] = meta_result
         except Exception as e:
@@ -94,10 +92,9 @@ class DeepLearningTrainerXGBoost:
 
 
         self.save_all_models()
-        # نمرر قاموس الموديلات بالكامل (الاسم + الكائن) ليتم حفظه
         self.db.save_models_to_db(self.models, results)
 
-        print("\n✅ All 10 LightGBM models trained successfully!")
+        print("\n✅ All 9 LightGBM models trained successfully!")
         return True
 
     def save_all_models(self):
