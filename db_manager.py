@@ -26,35 +26,142 @@ class DatabaseManager:
 
     # ========== Load ==========
 
-    def load_training_data(self):
-        """Load historical SELL trades for training"""
+    def load_training_data(self, limit=None, offset=None):
+        """Load historical SELL trades for training, with support for batching."""
         conn = self._get_conn()
         if not conn:
             return None
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("""
+            
+            query = """
                 SELECT symbol, profit_percent, action, timestamp, data
                 FROM trades_history
                 WHERE action = 'SELL'
                   AND data IS NOT NULL
                 ORDER BY timestamp ASC
-                LIMIT 2000
-            """)
+            """
+            params = []
+            if limit is not None:
+                query += " LIMIT %s"
+                params.append(limit)
+            if offset is not None:
+                query += " OFFSET %s"
+                params.append(offset)
+
+            cursor.execute(query, tuple(params))
             trades = cursor.fetchall()
             cursor.close()
             close_db_connection(conn)
 
-            if len(trades) < self.min_trades_for_training:
-                print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
-                return None
-
-            print(f"📊 Loaded {len(trades)} trades for training")
+            # For the first batch, check the minimum requirement
+            if offset is None or offset == 0:
+                if len(trades) < self.min_trades_for_training:
+                    print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
+                    return None
+                print(f"📊 Loaded initial batch of {len(trades)} trades for training")
+            
             return trades
         except Exception as e:
             print(f"❌ Error loading data: {e}")
             close_db_connection(conn)
             return None
+
+    def get_total_trades_count(self):
+        """Get the total number of SELL trades available for training."""
+        conn = self._get_conn()
+        if not conn:
+            return 0
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM trades_history
+                WHERE action = 'SELL'
+                  AND data IS NOT NULL
+            """)
+            count = cursor.fetchone()[0]
+            cursor.close()
+            close_db_connection(conn)
+            return count
+        except Exception as e:
+            print(f"❌ Error getting total trades count: {e}")
+            close_db_connection(conn)
+            return 0
+
+    def load_ai_decisions(self, limit=1000):
+        """Load historical decisions from ai_decisions table."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            # This table has no 'reasons' or 'created_at' column, so it's removed.
+            cursor.execute("""
+                SELECT symbol, decision, confidence, timestamp
+                FROM ai_decisions
+                WHERE decision IN ('BUY', 'SELL')
+                ORDER BY id DESC
+                LIMIT %s
+            """, (limit,))
+            decisions = cursor.fetchall()
+            cursor.close()
+            close_db_connection(conn)
+            print(f"🧠 Loaded {len(decisions)} historical AI decisions.")
+            return decisions
+        except Exception as e:
+            print(f"❌ Error loading AI decisions: {e}")
+            if conn:
+                close_db_connection(conn)
+            return []
+
+    def load_traps(self, limit=500):
+        """Load data from the trap_memory table."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT symbol, data, timestamp
+                FROM trap_memory
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, (limit,))
+            traps = cursor.fetchall()
+            cursor.close()
+            close_db_connection(conn)
+            print(f"🪤 Loaded {len(traps)} records from trap memory.")
+            return traps
+        except Exception as e:
+            print(f"❌ Error loading trap memory: {e}")
+            if conn:
+                close_db_connection(conn)
+            return []
+
+    def load_trades(self, limit=2000):
+        """Load all types of trades from trades_history table."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT symbol, profit_percent, action, timestamp, data
+                FROM trades_history
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, (limit,))
+            trades = cursor.fetchall()
+            cursor.close()
+            close_db_connection(conn)
+            print(f"📜 Loaded {len(trades)} records from trades history.")
+            return trades
+        except Exception as e:
+            print(f"❌ Error loading trades history: {e}")
+            if conn:
+                close_db_connection(conn)
+            return []
 
     def calculate_voting_accuracy(self, trades):
         """حساب دقة تصويت المستشارين من جدول consultant_votes"""
