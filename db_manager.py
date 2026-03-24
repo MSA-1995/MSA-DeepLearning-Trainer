@@ -6,6 +6,7 @@ Handles all PostgreSQL operations: connect, load, save.
 import json
 import pickle
 from datetime import datetime, timedelta
+import time
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -240,7 +241,6 @@ class DatabaseManager:
                 conn = self._get_conn()
                 if not conn:
                     print(f"⚠️ Attempt {attempt+1}/{retry}: No database connection available. Retrying...")
-                    import time
                     time.sleep(5) # Wait longer if the pool is empty
                     continue
 
@@ -292,7 +292,6 @@ class DatabaseManager:
                     except Exception as close_e:
                         print(f"- Error while closing failed connection: {close_e}")
                 if attempt < retry - 1:
-                    import time
                     time.sleep(5) # Wait before retrying
             except Exception as e:
                 print(f"❌ Attempt {attempt+1}/{retry} failed with general error: {e}")
@@ -302,7 +301,6 @@ class DatabaseManager:
                     except Exception as rb_e:
                         print(f"- Error during rollback: {rb_e}")
                 if attempt < retry - 1:
-                    import time
                     time.sleep(2)
             finally:
                 if conn:
