@@ -5,10 +5,10 @@ Each function trains one model and returns (model, accuracy).
 
 import json
 import numpy as np
+import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-
+from sklearn.metrics import accuracy_score, classification_report
 from features import calculate_enhanced_features
 
 
@@ -44,8 +44,8 @@ def _train_lgb(X, y, n_estimators=100, max_depth=5, learning_rate=0.1):
     return model, accuracy
 
 
-def train_meta_learner_model(trades, trained_models):
-    """👑🧠 Train the Meta-Learner (The New King)
+def train_meta_learner_model(db_manager, trained_models, batch_size=500):
+    """👑🧠 Train the Meta-Learner (The New King) in batches.
      يتعلم من قرارات المستشارين الآخرين لاتخاذ قرار نهائي أكثر ذكاءً
     """
     print("\n👑🧠 Training Meta-Learner Model (The New King)...")
@@ -54,49 +54,108 @@ def train_meta_learner_model(trades, trained_models):
         print("⚠️ Not enough trained consultant models to train the Meta-Learner.")
         return None
 
-    # 1. بناء مجموعة بيانات جديدة من آراء المستشارين
+    # 1. تحميل البيانات المساعدة (قرارات براين، الأفخاخ) مرة واحدة
+    print("Loading auxiliary data (AI decisions, traps)...")
+    try:
+        ai_decisions = db_manager.load_ai_decisions(limit=50000)
+        trap_memory = db_manager.load_traps(limit=10000)
+        ai_decisions_df = pd.DataFrame(ai_decisions)
+        trap_memory_df = pd.DataFrame(trap_memory)
+        
+        # الحصول على العدد الإجمالي للصفقات لبدء المعالجة بالدفعات
+        total_trades = db_manager.get_total_trades_count()
+        if total_trades == 0:
+            print("⚠️ No trades found to train the Meta-Learner.")
+            return None
+        print(f"📈 Found {total_trades} total trades. Starting batch processing for the King.")
+
+    except Exception as e:
+        print(f"❌ Error loading initial data for Meta-Learner: {e}")
+        print("💡 Hint: Make sure the 'get_total_trades_count' method is implemented in db_manager.py")
+        return None
+
+    # 2. بناء مجموعة البيانات على دفعات
     meta_features = []
     final_labels = []
-
-    # استبعاد الملك الجديد نفسه من قائمة المستشارين للمدخلات
     consultant_models = {k: v for k, v in trained_models.items() if k != 'meta_learner' and v is not None}
 
-    for trade in trades:
+    for offset in range(0, total_trades, batch_size):
+        print(f"  -> Processing batch for King: (Trades {offset} to {offset + batch_size})")
         try:
-            data = trade.get('data', {})
-            if isinstance(data, str):
-                data = json.loads(data)
-
-            # الحصول على آراء (توقعات) كل مستشار لهذه الصفقة
-            consultant_opinions = []
-            for model_name, model in consultant_models.items():
-                # نحتاج إلى بناء نفس الميزات التي تدرب عليها كل مستشار
-                # هذه عملية معقدة، سنقوم بتبسيطها الآن بالاعتماد على النقاط المسجلة مباشرة
-                # إذا كانت النقاط غير موجودة، سنستخدم 0 كقيمة افتراضية
-                opinion = data.get(f'{model_name}_score', 0) 
-                consultant_opinions.append(opinion)
+            trades_batch = db_manager.load_training_data(limit=batch_size, offset=offset)
+            if not trades_batch:
+                break
             
-            # أضف رأي المستشارين كـ "ميزات" للملك الجديد
-            meta_features.append(consultant_opinions)
-            
-            # الهدف: هل الصفقة كانت ناجحة؟
-            final_labels.append(1 if float(trade.get('profit_percent', 0)) > 0.8 else 0)
+            trades_df = pd.DataFrame([dict(t) for t in trades_batch])
 
-        except Exception as e:
-            # print(f"Skipping trade for Meta-Learner due to error: {e}")
+            for index, trade in trades_df.iterrows():
+                try:
+                    data = trade.get('data', {})
+                    if isinstance(data, str):
+                        data = json.loads(data)
+
+                    consultant_opinions = [data.get(f'{model_name}_score', 0.5) for model_name in consultant_models.keys()]
+                    
+                    symbol = trade['symbol']
+                    buy_time = None
+                    if 'buy_time' in trade and pd.notna(trade['buy_time']):
+                        buy_time = pd.to_datetime(trade['buy_time'])
+                    else:
+                        trade_time = pd.to_datetime(trade['timestamp'])
+                        decisions_before_trade = ai_decisions_df[
+                            (ai_decisions_df['symbol'] == symbol) &
+                            (ai_decisions_df['decision'] == 'BUY') &
+                            (pd.to_datetime(ai_decisions_df['timestamp']) < trade_time)
+                        ]
+                        if not decisions_before_trade.empty:
+                            last_buy_decision = decisions_before_trade.sort_values('timestamp', ascending=False).iloc[0]
+                            buy_time = pd.to_datetime(last_buy_decision['timestamp'])
+
+                    if buy_time is None:
+                        continue
+
+                    relevant_decision = None
+                    if not ai_decisions_df.empty:
+                        decisions_before_buy = ai_decisions_df[
+                            (ai_decisions_df['symbol'] == symbol) &
+                            (pd.to_datetime(ai_decisions_df['timestamp']) < buy_time)
+                        ]
+                        if not decisions_before_buy.empty:
+                            relevant_decision = decisions_before_buy.sort_values('timestamp', ascending=False).iloc[0]
+
+                    brain_confidence = relevant_decision['confidence'] if relevant_decision is not None else 50
+                    
+                    was_trapped = False
+                    if not trap_memory_df.empty:
+                        was_trapped = not trap_memory_df[
+                            (trap_memory_df['symbol'] == symbol) &
+                            (pd.to_datetime(trap_memory_df['timestamp']) > buy_time - pd.Timedelta(hours=24)) &
+                            (pd.to_datetime(trap_memory_df['timestamp']) < buy_time)
+                        ].empty
+
+                    features = consultant_opinions + [brain_confidence, 1 if was_trapped else 0]
+                    meta_features.append(features)
+                    final_labels.append(1 if float(trade.get('profit_percent', 0)) > 0.8 else 0)
+
+                except Exception as e_inner:
+                    # This will silently skip a single problematic trade in a batch
+                    continue
+        
+        except Exception as e_outer:
+            print(f"❌ Failed to process a batch: {e_outer}")
             continue
 
     if len(meta_features) < 100:
-        print(f"⚠️ Not enough data for Meta-Learner ({len(meta_features)} trades found)")
+        print(f"⚠️ Not enough data for Meta-Learner after processing all batches ({len(meta_features)} trades found)")
         return None
 
-    # 2. تدريب الملك الجديد
-    # نستخدم مصنف أقوى قليلاً لأنه يتعلم من بيانات معقدة
+    # 3. تدريب الملك الجديد
+    print(f"\nCollected {len(meta_features)} samples. Now training the King...")
     model, accuracy = _train_lgb(
         np.array(meta_features),
         np.array(final_labels),
         n_estimators=300, 
-        max_depth=4, # عمق أقل لتجنب الحفظ الزائد (Overfitting)
+        max_depth=5,
         learning_rate=0.03
     )
     
@@ -106,33 +165,7 @@ def train_meta_learner_model(trades, trained_models):
 
 # ========== Models ==========
 
-def train_ai_brain_model(trades, voting_scores=None):
-    """👑 Train AI Brain (الملك) - القرار النهائي"""
-    print("\n👑 Training AI Brain Model (LightGBM)...")
-    scores = (voting_scores or {}).get('ai_brain', {})
 
-    def features(data, trade):
-        return [
-            data.get('rsi', 50),          data.get('macd', 0),
-            data.get('volume_ratio', 1),   data.get('price_momentum', 0),
-            data.get('confidence', 60),    data.get('mtf_score', 0),
-            data.get('risk_score', 0),     data.get('anomaly_score', 0),
-            data.get('exit_score', 0),     data.get('pattern_score', 0),
-            data.get('ranking_score', 0),  data.get('atr', 1),
-            data.get('ema_crossover', 0),  data.get('bid_ask_spread', 0),
-            data.get('volume_trend', 0),   data.get('price_change_1h', 0),
-            scores.get('tp_accuracy', 0.5),    scores.get('amount_accuracy', 0.5),
-            scores.get('sl_accuracy', 0.5),    scores.get('sell_accuracy', 0.5),
-        ]
-
-    fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
-    if len(fl) < 50:
-        print("⚠️ Not enough data for AI Brain")
-        return None
-
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=250, max_depth=8, learning_rate=0.04)
-    print(f"👑 AI Brain Model: Accuracy {accuracy*100:.2f}%")
-    return model, accuracy
 
 
 def train_smart_money_model(trades, voting_scores=None):
