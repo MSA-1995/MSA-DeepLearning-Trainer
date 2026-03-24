@@ -3,10 +3,27 @@
 8 Specialized LightGBM Models: AI Brain + 7 Consultants
 """
 
+# ========== SETUP SYS.PATH ==========
+# This is the most critical part. It tells the script where to find the 'src' folder.
+import sys
+import os
+try:
+    # Get the directory of the current script (MSA-DeepLearning-Trainer)
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Go up two levels to the project root (TradingBot-AI)
+    _project_root = os.path.abspath(os.path.join(_script_dir, '..', '..'))
+    # Construct the path to the 'src' directory
+    _src_path = os.path.join(_project_root, 'src')
+    # Add the 'src' path to the top of Python's search paths
+    if _src_path not in sys.path:
+        sys.path.insert(0, _src_path)
+    print(f"✅ System path configured to include: {_src_path}")
+except Exception as e:
+    print(f"❌ CRITICAL: Failed to configure system path. Cannot continue. Error: {e}")
+    sys.exit(1) # Exit if we can't find the src directory
+
 # ========== AUTO-UPDATE PIP ==========
 import subprocess
-import sys
-
 try:
     print("🔄 Checking pip updates...")
     result = subprocess.run(
@@ -31,14 +48,12 @@ for _pkg in _packages:
                        capture_output=True, check=False, timeout=120)
 
 # ========== LOAD ENV FILE & KEYS ==========
-import os
-
 # --- 1. Load .env file ---
 # Look for .env in the script's directory first, then in common server paths
-_script_dir = os.path.dirname(os.path.abspath(__file__))
 _env_loaded = False
 for _env_file in [
     os.path.join(_script_dir, '.env'), # Local .env file
+    os.path.join(_project_root, '.env'), # Project root .env file
     '/home/container/DeepLearningTrainer_XGBoost/.env',
     '/home/container/.env',
 ]:
@@ -80,8 +95,6 @@ if not os.getenv('ENCRYPTION_KEY'):
         print(f"❌ Error reading encryption key from flash drive: {e}")
 
 # ========== MAIN ==========
-import threading
-import time
 from trainer import DeepLearningTrainerXGBoost
 
 def main():
