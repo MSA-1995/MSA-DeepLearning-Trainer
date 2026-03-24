@@ -24,7 +24,7 @@ except ImportError:
     PBKDF2HMAC = None
     default_backend = None
 
-ENCRYPTED_CRITICAL_WEBHOOK = "gAAAAABpvbaL8kNDyeRc6l4srWXmt0hIWOVPgNrHhBU4Tk6NR5h0rm5_02lY_xYMXKYmQiNrkh0T3G5hjD87eE1-8zv6glgmmLoHlqvRMjrhBP0zVy2eoYOVyNsUUBaU-NmQs6pRDxZQhOpDOSkh_elQccWtsKwGfMONzEQ8_3vhZh0pagJgT_C7g4Qd6qxaePhIUSjMhr7iNKlKqwiXPP_1fs7UeaY_xfeU7I9mJc2Sv2OHLTEc9SE="
+ENCRYPTED_CRITICAL_WEBHOOK = "gAAAAABpwvw0pPVH-QpC6XaqbfA2_Tpelbc5ZSnXpbTvxd-IjRHfF9BxlJFlk5ppgFE5uVzm2oEvtiRl9xZREKREuNzz5ZH3bzcZ6VmzufOu_F_VSrkO8-PgVZrbiFsUjZRihOXW2MT4WUmewtNjyrabini37aBJgLQrTgYY7QKRQWeHlMFmGP2fD4inb2rrQU4V2KmnbSOwpcBu85xQK5vqsd9OQpDs4Gjvt0-3S8TxyeOO2_OMTxM="
 
 # Master key for password encryption (must match trading bot)
 _MASTER_KEY = base64.urlsafe_b64encode(b'MSA_TRADING_BOT_2026_SECRET_KEY!')
