@@ -96,7 +96,7 @@ if not os.getenv('ENCRYPTION_KEY'):
 
 # ========== MAIN ==========#
 from trainer import DeepLearningTrainerXGBoost
-from db_manager import DbManager # استيراد مدير قاعدة البيانات
+from db_manager import DatabaseManager # استيراد مدير قاعدة البيانات
 
 def apply_db_schema_fix():
     """
@@ -108,7 +108,7 @@ def apply_db_schema_fix():
     db_manager = None
     conn = None
     try:
-        db_manager = DbManager()
+        db_manager = DatabaseManager()
         conn = db_manager._get_conn()
         if not conn:
             print("⚠️ تعذر الحصول على اتصال بقاعدة البيانات لتطبيق إصلاح المخطط. ستتم إعادة المحاولة في التشغيل التالي.")
