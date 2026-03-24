@@ -7,18 +7,13 @@ from datetime import datetime, timezone
 import os
 import sys
 
-# Add the project root to the Python path to allow imports from the 'src' directory
-# This is a robust way to handle imports in scripts.
+# The entry script (deep_trainer_v2.py) is now responsible for setting up sys.path.
+# We can now import directly.
 try:
-    # Move up two directories from the current script's location (scripts/MSA-DeepLearning-Trainer) to reach the project root
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    src_path = os.path.join(project_root, 'src')
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
     from config_encrypted import get_critical_webhook, get_training_webhook
 except ImportError as e:
-    print(f"❌ CRITICAL: Could not import webhook configurations. Ensure the script is in the correct project structure. Error: {e}")
-    # Define dummy functions to prevent further crashes
+    print(f"❌ CRITICAL: Could not import 'config_encrypted'. Ensure the entry script has configured sys.path correctly. Error: {e}")
+    # Define dummy functions to prevent further crashes if import fails
     def get_training_webhook(): return None
     def get_critical_webhook(): return None
 
