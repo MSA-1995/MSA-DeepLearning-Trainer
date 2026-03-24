@@ -1,25 +1,15 @@
 """
-🚨 Critical Alerts - Discord Webhook + Encryption
+🚨 Critical Alerts - Discord Webhook
 """
 
 import requests
 from datetime import datetime, timezone
 import os
-import sys
-
-# The entry script (deep_trainer_v2.py) is now responsible for setting up sys.path.
-# We can now import directly.
-try:
-    from config_encrypted import get_critical_webhook, get_training_webhook
-except ImportError as e:
-    print(f"❌ CRITICAL: Could not import 'config_encrypted'. Ensure the entry script has configured sys.path correctly. Error: {e}")
-    # Define dummy functions to prevent further crashes if import fails
-    def get_training_webhook(): return None
-    def get_critical_webhook(): return None
 
 # --- Webhook URLs ---
-TRAINING_WEBHOOK = get_training_webhook()
-CRITICAL_WEBHOOK = get_critical_webhook()
+# يقرأ مباشرة من متغيرات البيئة التي تم تحميلها في deep_trainer_v2.py
+TRAINING_WEBHOOK = os.getenv('TRAINING_WEBHOOK')
+CRITICAL_WEBHOOK = os.getenv('CRITICAL_WEBHOOK')
 
 
 def send_training_notification(title, fields, color_hex='2ecc71'):
