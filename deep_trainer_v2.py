@@ -6,6 +6,34 @@
 # ========== Add src to path ==========
 import sys
 import os
+# المسار إلى المجلد الرئيسي للمشروع (TradingBot-AI)
+# يفترض أن هذا السكربت موجود في TradingBot-AI/scripts/MSA-DeepLearning-Trainer
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+src_path = os.path.join(project_root, 'src')
+
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+    print(f"✅ Added '{src_path}' to Python path")
+
+# =====================================
+
+# ========== AUTO-UPDATE PIP ==========
+import sys
+import os
+# المسار إلى المجلد الرئيسي للمشروع (TradingBot-AI)
+# يفترض أن هذا السكربت موجود في TradingBot-AI/scripts/MSA-DeepLearning-Trainer
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+src_path = os.path.join(project_root, 'src')
+
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+    print(f"✅ Added '{src_path}' to Python path")
+
+# =====================================
+
+# ========== AUTO-UPDATE PIP ==========
+import sys
+import os
 # المسار إلى المجلد الرئيسي للمشروع (TradingBota_AI)
 # يفترض أن هذا السكربت موجود في TradingBota_AI/scripts/MSA-DeepLearning-Trainer
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
