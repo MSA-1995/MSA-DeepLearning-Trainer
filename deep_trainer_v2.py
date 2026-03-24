@@ -92,7 +92,7 @@ def heartbeat_loop():
             send_heartbeat_notification()
         except Exception as e:
             print(f"❌ Error in heartbeat loop: {e}")
-        time.sleep(60) # Wait for 60 seconds
+        time.sleep(600) # Wait for 10 minutes
 
 
 
