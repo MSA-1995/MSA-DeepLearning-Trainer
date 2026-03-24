@@ -96,47 +96,6 @@ if not os.getenv('ENCRYPTION_KEY'):
 
 # ========== MAIN ==========#
 from trainer import DeepLearningTrainerXGBoost
-from db_manager import DatabaseManager # استيراد مدير قاعدة البيانات
-
-def apply_db_schema_fix():
-    """
-    يقوم بتطبيق إصلاح لمرة واحدة على جدول 'dl_models_v2'
-    عن طريق إضافة قيد UNIQUE. تم تصميم هذا ليعمل تلقائيًا وأمان،
-    حتى لو تم تطبيق الإصلاح بالفعل.
-    """
-    print("🔧 محاولة تطبيق إصلاح مخطط قاعدة البيانات لـ 'dl_models_v2'...")
-    db_manager = None
-    conn = None
-    try:
-        db_manager = DatabaseManager()
-        conn = db_manager._get_conn()
-        if not conn:
-            print("⚠️ تعذر الحصول على اتصال بقاعدة البيانات لتطبيق إصلاح المخطط. ستتم إعادة المحاولة في التشغيل التالي.")
-            return
-
-        with conn.cursor() as cursor:
-            # هذا الأمر سيفشل إذا كان القيد موجودًا بالفعل، وهو ما نريده.
-            alter_command = "ALTER TABLE dl_models_v2 ADD CONSTRAINT uq_model_name_type UNIQUE (model_name, model_type);"
-            cursor.execute(alter_command)
-            conn.commit()
-            print("✅ تم تطبيق قيد UNIQUE بنجاح على جدول 'dl_models_v2'.")
-
-    except Exception as e:
-        # رمز الخطأ '42710' في PostgreSQL هو لـ 'duplicate_object'.
-        # يمكننا تجاهله بأمان، لأنه يعني أن القيد موجود بالفعل.
-        if '42710' in str(e) or "already exists" in str(e).lower() or "duplicate" in str(e).lower():
-            print("ℹ️ مخطط قاعدة البيانات محدث بالفعل. لا حاجة لإجراء تغييرات.")
-        else:
-            # لأي خطأ آخر، نقوم بطباعته والتراجع.
-            print(f"❌ حدث خطأ غير متوقع أثناء تطبيق إصلاح المخطط: {e}")
-            if conn:
-                try:
-                    conn.rollback()
-                except Exception as rb_e:
-                    print(f"❌ فشل التراجع عن المعاملة: {rb_e}")
-    finally:
-        if conn and db_manager:
-            db_manager._close_conn(conn)
 
 def main():
     trainer = DeepLearningTrainerXGBoost()
@@ -145,8 +104,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # --- تطبيق إصلاح المخطط قبل التشغيل ---
-    apply_db_schema_fix()
-
     # --- تشغيل التطبيق الرئيسي ---
     main()
