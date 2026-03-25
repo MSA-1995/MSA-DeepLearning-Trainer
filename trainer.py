@@ -19,7 +19,6 @@ from models import (
     train_pattern_model,
     train_liquidity_model,
     train_chart_cnn_model,
-    train_rescue_model,
     train_meta_learner_model, # 👑🧠 The New King!
 )
 
@@ -32,7 +31,6 @@ TRAIN_PIPELINE = [
     ('pattern',     train_pattern_model),
     ('liquidity',   train_liquidity_model),
     ('chart_cnn',   train_chart_cnn_model),
-    ('rescue',      train_rescue_model), # 🤪 Added The Jester
     ('meta_learner', train_meta_learner_model), # 👑🧠 The New King!
 ]
 
