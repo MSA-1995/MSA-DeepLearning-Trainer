@@ -123,7 +123,7 @@ class DeepLearningTrainerXGBoost:
             try:
                 # --- تدريب فوري --- 
                 print(f"\n{'='*60}")
-                print(f"🎯 Training triggered: Initial run at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}")
+                print(f"🎯 Training triggered: Initial run at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"{'='*60}")
 
                 success = self.train_all_models()
