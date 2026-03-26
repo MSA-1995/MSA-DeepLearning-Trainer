@@ -1,5 +1,5 @@
 """
-🧠 Training Models - 8 LightGBM Models
+🧠 Training Models -  LightGBM Models
 Each function trains one model and returns (model, accuracy).
 """
 
@@ -29,9 +29,14 @@ def _build_dataset(trades, feature_fn, label_fn):
     return features_list, labels_list
 
 
-def _train_lgb(X, y, n_estimators=100, max_depth=5, learning_rate=0.1):
+def _train_lgb(X, y, feature_names, n_estimators=100, max_depth=5, learning_rate=0.1):
     """Train LightGBM classifier and return (model, accuracy)."""
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # تحويل البيانات إلى DataFrame مع أسماء الميزات
+    X_df = pd.DataFrame(X, columns=feature_names)
+    y_s = pd.Series(y, name='target')
+
+    X_train, X_test, y_train, y_test = train_test_split(X_df, y_s, test_size=0.2, random_state=42, stratify=y_s)
+    
     model = lgb.LGBMClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -39,13 +44,14 @@ def _train_lgb(X, y, n_estimators=100, max_depth=5, learning_rate=0.1):
         random_state=42,
         verbose=-1
     )
+    # التدريب باستخدام DataFrame يضمن حفظ أسماء الميزات
     model.fit(X_train, y_train)
     accuracy = accuracy_score(y_test, model.predict(X_test))
     return model, accuracy
 
 
-def train_meta_learner_model(db_manager, trained_models, batch_size=500):
-    """👑🧠 Train the Meta-Learner (The New King) in batches.
+def train_meta_learner_model(db_manager, trained_models):
+    """👑🧠 Train the Meta-Learner (The New King) all at once.
      يتعلم من قرارات المستشارين الآخرين لاتخاذ قرار نهائي أكثر ذكاءً
     """
     print("\n👑🧠 Training Meta-Learner Model (The New King)...")
@@ -62,30 +68,27 @@ def train_meta_learner_model(db_manager, trained_models, batch_size=500):
         ai_decisions_df = pd.DataFrame(ai_decisions)
         trap_memory_df = pd.DataFrame(trap_memory)
         
-        # الحصول على العدد الإجمالي للصفقات لبدء المعالجة بالدفعات
+        # الحصول على العدد الإجمالي للصفقات
         total_trades = db_manager.get_total_trades_count()
         if total_trades == 0:
             print("⚠️ No trades found to train the Meta-Learner.")
             return None
-        print(f"📈 Found {total_trades} total trades. Starting batch processing for the King.")
+        print(f"📈 Found {total_trades} total trades. Processing all for the King.")
 
     except Exception as e:
         print(f"❌ Error loading initial data for Meta-Learner: {e}")
         print("💡 Hint: Make sure the 'get_total_trades_count' method is implemented in db_manager.py")
         return None
 
-    # 2. بناء مجموعة البيانات على دفعات
+    # 2. بناء مجموعة البيانات دفعة واحدة
     meta_features = []
     final_labels = []
     consultant_models = {k: v for k, v in trained_models.items() if k != 'meta_learner' and v is not None}
 
-    for offset in range(0, total_trades, batch_size):
-        print(f"  -> Processing batch for King: (Trades {offset} to {offset + batch_size})")
-        try:
-            trades_batch = db_manager.load_training_data(limit=batch_size, offset=offset)
-            if not trades_batch:
-                break
-            
+    print(f"  -> Processing all {total_trades} trades for King at once...")
+    try:
+        trades_batch = db_manager.load_training_data(limit=total_trades)
+        if trades_batch:
             trades_df = pd.DataFrame([dict(t) for t in trades_batch])
 
             for index, trade in trades_df.iterrows():
@@ -138,22 +141,26 @@ def train_meta_learner_model(db_manager, trained_models, batch_size=500):
                     final_labels.append(1 if float(trade.get('profit_percent', 0)) > 0.8 else 0)
 
                 except Exception as e_inner:
-                    # This will silently skip a single problematic trade in a batch
+                    # This will silently skip a single problematic trade
                     continue
         
-        except Exception as e_outer:
-            print(f"❌ Failed to process a batch: {e_outer}")
-            continue
+    except Exception as e_outer:
+        print(f"❌ Failed to process trades: {e_outer}")
 
     if len(meta_features) < 100:
-        print(f"⚠️ Not enough data for Meta-Learner after processing all batches ({len(meta_features)} trades found)")
+        print(f"⚠️ Not enough data for Meta-Learner ({len(meta_features)} trades found)")
         return None
 
     # 3. تدريب الملك الجديد
     print(f"\nCollected {len(meta_features)} samples. Now training the King...")
+    
+    # تحديد أسماء الميزات للملك
+    meta_feature_names = [f'consultant_{name}' for name in consultant_models.keys()] + ['brain_confidence', 'was_trapped']
+
     model, accuracy = _train_lgb(
-        np.array(meta_features),
+        meta_features,
         np.array(final_labels),
+        feature_names=meta_feature_names,
         n_estimators=300, 
         max_depth=5,
         learning_rate=0.03
@@ -184,12 +191,17 @@ def train_smart_money_model(trades, voting_scores=None):
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ]
 
+    feature_names = [
+        'rsi', 'macd', 'volume_ratio', 'price_momentum', 'atr', 'ema_crossover', 
+        'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
+        'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+    ]
     fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
     if len(fl) < 50:
         print("⚠️ Not enough data for Smart Money")
         return None
 
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=150, max_depth=6, learning_rate=0.08)
+    model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=150, max_depth=6, learning_rate=0.08)
     print(f"🐋 Smart Money Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
 
@@ -210,12 +222,17 @@ def train_risk_model(trades, voting_scores=None):
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ]
 
+    feature_names = [
+        'rsi', 'volume_ratio', 'confidence', 'price_momentum', 'atr', 'ema_crossover',
+        'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
+        'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+    ]
     fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) < -1.0 else 0)
     if len(fl) < 50:
         print("⚠️ Not enough data for Risk")
         return None
 
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=100, max_depth=5, learning_rate=0.1)
+    model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=100, max_depth=5, learning_rate=0.1)
     print(f"✅ Risk Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
 
@@ -236,12 +253,17 @@ def train_anomaly_model(trades, voting_scores=None):
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ]
 
+    feature_names = [
+        'rsi', 'macd', 'volume_ratio', 'price_momentum', 'atr', 'ema_crossover',
+        'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
+        'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+    ]
     fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) < -1.5 else 0)
     if len(fl) < 50:
         print("⚠️ Not enough data for Anomaly")
         return None
 
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=100, max_depth=5, learning_rate=0.1)
+    model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=100, max_depth=5, learning_rate=0.1)
     print(f"✅ Anomaly Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
 
@@ -266,12 +288,17 @@ def train_exit_model(trades, voting_scores=None):
         p = float(trade.get('profit_percent', 0))
         return 1 if (p > 1.0 or p < -1.0) else 0
 
+    feature_names = [
+        'rsi', 'macd', 'confidence', 'price_momentum', 'atr', 'ema_crossover',
+        'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
+        'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+    ]
     fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("⚠️ Not enough data for Exit")
         return None
 
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=100, max_depth=5, learning_rate=0.1)
+    model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=100, max_depth=5, learning_rate=0.1)
     print(f"✅ Exit Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
 
@@ -292,12 +319,17 @@ def train_pattern_model(trades, voting_scores=None):
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ]
 
+    feature_names = [
+        'rsi', 'macd', 'volume_ratio', 'price_momentum', 'confidence', 'atr',
+        'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h',
+        'tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+    ]
     fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
     if len(fl) < 50:
         print("⚠️ Not enough data for Pattern")
         return None
 
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=150, max_depth=6, learning_rate=0.08)
+    model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=150, max_depth=6, learning_rate=0.08)
     print(f"✅ Pattern Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
 
@@ -351,7 +383,8 @@ def train_liquidity_model(trades, voting_scores=None):
         spread_vol   = float(np.std(cd['bid_ask_spreads'])) if len(cd['bid_ask_spreads']) > 1 else 0
 
         features_list.append([
-            avg_profit,             win_rate,              cd['count'],
+            avg_profit,             win_rate,              
+            cd['count'],
             max(cd['profits']),     min(cd['profits']),
             _avg(cd['volume_ratios']),      _avg(cd['bid_ask_spreads']),
             _avg(cd['volume_trends']),      _avg(cd['depth_ratios']),
@@ -362,11 +395,19 @@ def train_liquidity_model(trades, voting_scores=None):
         ])
         labels_list.append(1 if (avg_profit > 0.8 and win_rate > 0.55) else 0)
 
+    feature_names = [
+        'avg_profit', 
+        'win_rate',   
+        'trade_count', 'max_profit', 'min_profit',
+        'avg_volume_ratio', 'avg_bid_ask_spread', 'avg_volume_trend', 'avg_depth_ratio',
+        'avg_liquidity_score', 'avg_price_impact', 'avg_volume_consistency', 'spread_volatility',
+        'tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+    ]
     if len(features_list) < 20:
         print("⚠️ Not enough coins for Liquidity")
         return None
 
-    model, accuracy = _train_lgb(np.array(features_list), np.array(labels_list),
+    model, accuracy = _train_lgb(features_list, np.array(labels_list), feature_names,
                                   n_estimators=200, max_depth=6, learning_rate=0.05)
     print(f"💧 Liquidity Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
@@ -385,11 +426,20 @@ def train_chart_cnn_model(trades, voting_scores=None):
         ])
         return base
 
+    # تم جلب أسماء الميزات الأساسية من ملف features.py
+    base_feature_names = [
+        'rsi', 'macd', 'volume_ratio', 'price_momentum',
+        'bb_position', 'atr_estimate', 'stochastic', 'ema_signal',
+        'volume_strength', 'momentum_strength',
+        'atr', 'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h'
+    ]
+    feature_names = base_feature_names + ['tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy']
+
     fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
     if len(fl) < 50:
         print("⚠️ Not enough data for Chart Pattern")
         return None
 
-    model, accuracy = _train_lgb(np.array(fl), np.array(ll), n_estimators=150, max_depth=6, learning_rate=0.08)
+    model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=150, max_depth=6, learning_rate=0.08)
     print(f"📊 Chart Pattern Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
