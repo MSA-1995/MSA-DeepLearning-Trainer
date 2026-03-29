@@ -94,13 +94,45 @@ if not os.getenv('ENCRYPTION_KEY'):
     except Exception as e:
         print(f"❌ Error reading encryption key from flash drive: {e}")
 
-# ========== MAIN ==========#
+# ========== MAIN & LOCKING MECHANISM ==========#
 from trainer import DeepLearningTrainerXGBoost
 
 def main():
-    trainer = DeepLearningTrainerXGBoost()
-    # Train immediately, then every 6 hours.
-    trainer.run_continuous(interval_hours=6)
+    # --- آلية القفل لمنع التشغيل المتعدد ---
+    lock_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trainer.lock')
+    
+    if os.path.exists(lock_file_path):
+        # Check how old the lock file is. If it's older than 12 hours, it might be stale.
+        try:
+            lock_time = os.path.getmtime(lock_file_path)
+            if (time.time() - lock_time) > (12 * 60 * 60):
+                print("⚠️ Stale lock file found (older than 12 hours). Removing it.")
+                os.remove(lock_file_path)
+            else:
+                print("⛔ Training is already running (lock file exists). Exiting.")
+                sys.exit(1)
+        except Exception as e:
+            print(f"⚠️ Error checking stale lock file: {e}. Exiting to be safe.")
+            sys.exit(1)
+
+    try:
+        # Create the lock file
+        with open(lock_file_path, 'w') as f:
+            f.write(str(os.getpid()))
+        print("✅ Lock file created. Starting trainer...")
+
+        # --- بدء عملية التدريب ---
+        trainer = DeepLearningTrainerXGBoost()
+        # Train immediately, then every 6 hours.
+        trainer.run_continuous(interval_hours=6)
+
+    except Exception as e:
+        print(f"❌ An unexpected error occurred in the main execution: {e}")
+    finally:
+        # --- إزالة ملف القفل عند الانتهاء ---
+        if os.path.exists(lock_file_path):
+            os.remove(lock_file_path)
+            print("✅ Lock file removed. Training process finished.")
 
 
 if __name__ == "__main__":
