@@ -7,6 +7,7 @@
 # This is the most critical part. It tells the script where to find the 'src' folder.
 import sys
 import os
+import time
 try:
     # Get the directory of the current script (MSA-DeepLearning-Trainer)
     _script_dir = os.path.dirname(os.path.abspath(__file__))
