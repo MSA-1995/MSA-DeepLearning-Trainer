@@ -3,14 +3,52 @@
 Calculates technical indicators used as model input features.
 """
 
+from datetime import datetime
 
-def calculate_enhanced_features(data):
-    """Feature Engineering: حساب مؤشرات إضافية (15 feature)"""
+
+def calculate_enhanced_features(data, trade=None):
+    """
+    Feature Engineering: حساب مؤشرات إضافية (21 feature تقليدية + 7 ميزات جديدة)
+    
+    الميزات التقليدية:
+    - RSI, MACD, Volume, Momentum, etc.
+    
+    الميزات الجديدة من التعلم المباشر:
+    - trade_quality_score: تقييم الجودة (1-5)
+    - advisor_vote_consensus: توافق المستشارين (0-1)
+    - is_trap_trade: هل كانت صفقة فخ (0/1)
+    - profit_magnitude: حجم الربح/الخسارة
+    - hours_held_normalized: ساعات الاحتفاظ (0-2)
+    - is_profitable: هل الربح إيجابي (0/1)
+    
+    الميزات الجديدة من السوق والوقت:
+    - btc_trend_1h: اتجاه BTC في الساعة الماضية
+    - is_bullish_market: هل السوق صاعد (0/1)
+    - hour_of_day: ساعة الدخول (0-23)
+    - is_asian/european/us_session: جلسة التداول
+    - optimal_hold_score: درجة وقت الاحتفاظ المثالي
+    - fib_score: قوة مستوى فيبوناتشي
+    - fib_level_encoded: المستوى المشفر (0-6)
+    
+    Args:
+        data: قاموس البيانات التقنية (RSI, MACD, etc.)
+        trade: بيانات الصفقة الكاملة (اختياري)
+    """
     try:
-        rsi          = data.get('rsi', 50)
-        macd         = data.get('macd', 0)
-        volume_ratio = data.get('volume_ratio', 1)
-        price_momentum = data.get('price_momentum', 0)
+        # دمج البيانات إذا كان trade متوفراً
+        if trade:
+            trade_data = trade.get('data', {})
+            if isinstance(trade_data, str):
+                import json
+                trade_data = json.loads(trade_data)
+            full_data = {**trade, **trade_data, **data}
+        else:
+            full_data = data
+        
+        rsi          = full_data.get('rsi', 50)
+        macd         = full_data.get('macd', 0)
+        volume_ratio = full_data.get('volume_ratio', 1)
+        price_momentum = full_data.get('price_momentum', 0)
 
         # Bollinger Bands approximation
         bb_position = (rsi - 30) / 40
@@ -31,19 +69,163 @@ def calculate_enhanced_features(data):
         momentum_strength = abs(price_momentum) / 10.0
 
         # New indicators
-        atr            = data.get('atr', atr_estimate)
-        ema_9          = data.get('ema_9', 0)
-        ema_21         = data.get('ema_21', 0)
+        atr            = full_data.get('atr', atr_estimate)
+        ema_9          = full_data.get('ema_9', 0)
+        ema_21         = full_data.get('ema_21', 0)
         ema_crossover  = 1 if ema_9 > ema_21 else -1
-        bid_ask_spread = data.get('bid_ask_spread', 0)
-        volume_trend   = data.get('volume_trend', 0)
-        price_change_1h = data.get('price_change_1h', 0)
+        bid_ask_spread = full_data.get('bid_ask_spread', 0)
+        volume_trend   = full_data.get('volume_trend', 0)
+        price_change_1h = full_data.get('price_change_1h', 0)
+        
+        # =========================================================
+        # 🎓 الميزات الجديدة من التعلم المباشر
+        # =========================================================
+        
+        # 1. تقييم الجودة (trade_quality)
+        trade_quality = full_data.get('trade_quality', 'OK')
+        quality_map = {'TRAP': 1, 'RISKY': 2, 'OK': 3, 'GOOD': 4, 'GREAT': 5}
+        trade_quality_score = quality_map.get(trade_quality, 3)
+        
+        # 2. توافق المستشارين (advisor consensus)
+        advisor_votes = full_data.get('advisor_votes', {})
+        if isinstance(advisor_votes, str):
+            import json
+            advisor_votes = json.loads(advisor_votes)
+        if advisor_votes and isinstance(advisor_votes, dict):
+            vote_count = sum(1 for v in advisor_votes.values() if v == 1)
+            total_votes = len(advisor_votes)
+            advisor_vote_consensus = vote_count / total_votes if total_votes > 0 else 0.5
+        else:
+            advisor_vote_consensus = 0.5
+        
+        # 3. هل كانت صفقة فخ (is_trap)
+        is_trap_trade = 1 if trade_quality in ['TRAP', 'RISKY'] else 0
+        
+        # 4. حجم الربح/الخسارة (profit magnitude)
+        profit_percent = full_data.get('profit_percent', 0)
+        profit_magnitude = abs(profit_percent) / 10.0
+        
+        # 5. ساعة الاحتفاظ (hours held)
+        hours_held = full_data.get('hours_held', 24)
+        hours_held_normalized = min(hours_held / 48.0, 2.0)
+        
+        # 6. هل الربح إيجابي (is_profitable)
+        is_profitable = 1 if profit_percent > 0 else 0
+        
+        # =========================================================
+        # 🌍 الميزات الجديدة: سياق السوق والوقت
+        # =========================================================
+        
+        # 7. اتجاه BTC (market context)
+        btc_trend = full_data.get('btc_change_1h', full_data.get('btc_trend_1h', 0))
+        btc_trend_normalized = max(-1.0, min(1.0, btc_trend / 5.0))  # Normalize -5% to +5% => -1 to 1
+        
+        # 8. هل السوق صاعد (market mood)
+        is_bullish_market = 1 if btc_trend > 1.0 else 0
+        
+        # 9. ساعة الدخول (time-based)
+        timestamp = full_data.get('timestamp')
+        if timestamp:
+            try:
+                if isinstance(timestamp, str):
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                else:
+                    dt = timestamp
+                hour_of_day = dt.hour
+            except:
+                hour_of_day = 12
+        else:
+            hour_of_day = 12
+        
+        # تحويل الساعة إلى قيمة م нормализована (0-1 cycle)
+        hour_normalized = hour_of_day / 24.0
+        
+        # 10. جلسة التداول (session)
+        is_asian_session = 1 if 0 <= hour_of_day <= 8 else 0
+        is_european_session = 1 if 8 < hour_of_day <= 16 else 0
+        is_us_session = 1 if 16 < hour_of_day <= 24 else 0
+        
+        # 11. درجة الوقت المثالي للبيع (optimal hold)
+        # الصفقات الناجحة تستمر أكثر، الخاسرة تبيع بسرعة
+        if trade_quality in ['GREAT', 'GOOD']:
+            optimal_hold_score = 1.0 if hours_held > 12 else 0.5
+        elif trade_quality in ['TRAP', 'RISKY']:
+            optimal_hold_score = 1.0 if hours_held < 4 else 0.3
+        else:
+            optimal_hold_score = 0.5
+        
+        # =========================================================
+        # 📊 الميزات الجديدة: فيبوناتشي
+        # =========================================================
+        
+        # 12. Fibonacci score (قوة مستوى فيبوناتشي)
+        fib_score = full_data.get('fib_score', 0) or 0
+        decision_factors = full_data.get('decision_factors', {})
+        if isinstance(decision_factors, str):
+            import json
+            decision_factors = json.loads(decision_factors)
+        fib_score_from_decision = decision_factors.get('fib_score', 0) if decision_factors else 0
+        fib_score = max(fib_score, fib_score_from_decision)
+        
+        # 13. Fibonacci level (المستوى المشفر)
+        fib_level = full_data.get('fib_level') or decision_factors.get('fib_level') if decision_factors else None
+        fib_level_map = {'0': 0, '23.6': 1, '38.2': 2, '50': 3, '61.8': 4, '78.6': 5, '100': 6}
+        fib_level_encoded = fib_level_map.get(fib_level, 0) if fib_level else 0
 
         return [
+            # 15 الميزات التقليدية
             rsi, macd, volume_ratio, price_momentum,
             bb_position, atr_estimate, stochastic, ema_signal,
             volume_strength, momentum_strength,
-            atr, ema_crossover, bid_ask_spread, volume_trend, price_change_1h
+            atr, ema_crossover, bid_ask_spread, volume_trend, price_change_1h,
+            # 6 ميزات من التعلم المباشر
+            trade_quality_score,    # 16
+            advisor_vote_consensus, # 17
+            is_trap_trade,          # 18
+            profit_magnitude,       # 19
+            hours_held_normalized,  # 20
+            is_profitable,          # 21
+            # 7 ميزات جديدة: السوق والوقت
+            btc_trend_normalized,   # 22
+            is_bullish_market,      # 23
+            hour_normalized,        # 24
+            is_asian_session,       # 25
+            is_european_session,    # 26
+            is_us_session,          # 27
+            optimal_hold_score,     # 28
+            # 2 ميزات فيبوناتشي
+            fib_score,              # 29
+            fib_level_encoded       # 30
         ]
-    except:
-        return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0]
+    except Exception as e:
+        print(f"⚠️ Feature calculation error: {e}")
+        return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0, 3, 0.5, 0, 0, 0.5, 1, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0]
+
+
+def get_feature_names():
+    """أسماء الميزات للـ model interpretability"""
+    return [
+        # التقليدية (15)
+        'rsi', 'macd', 'volume_ratio', 'price_momentum',
+        'bb_position', 'atr_estimate', 'stochastic', 'ema_signal',
+        'volume_strength', 'momentum_strength',
+        'atr', 'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h',
+        # التعلم المباشر (6)
+        'trade_quality_score',
+        'advisor_vote_consensus',
+        'is_trap_trade',
+        'profit_magnitude',
+        'hours_held_normalized',
+        'is_profitable',
+        # السوق والوقت (7)
+        'btc_trend_normalized',
+        'is_bullish_market',
+        'hour_normalized',
+        'is_asian_session',
+        'is_european_session',
+        'is_us_session',
+        'optimal_hold_score',
+        # فيبوناتشي (2)
+        'fib_score',
+        'fib_level_encoded'
+    ]
