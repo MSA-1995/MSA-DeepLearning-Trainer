@@ -288,5 +288,15 @@ def get_feature_names():
         'optimal_hold_score',
         # فيبوناتشي (2)
         'fib_score',
-        'fib_level_encoded'
+        'fib_level_encoded',
+        # Market Regime (4)
+        'regime_score',
+        'regime_adx',
+        'volatility_ratio',
+        'position_multiplier',
+        # Flash Crash (4)
+        'flash_risk_score',
+        'flash_crash_detected',
+        'whale_dump_detected',
+        'cascade_risk_score'
     ]
