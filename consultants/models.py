@@ -237,7 +237,10 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
 
 
 def train_smart_money_model(trades, voting_scores=None):
-    """🐋 Train Smart Money Tracker"""
+    """🐋 Smart Money Tracker - يتعلم متى الأكابر يشترون
+    الوظيفة: اكتشاف دخول الأموال الذكية
+    الـ Label: صفقة ربحية كبيرة (profit > 1%)
+    """
     print("\n🐋 Training Smart Money Model (LightGBM)...")
     scores = (voting_scores or {}).get('smart_money', {})
 
@@ -257,18 +260,28 @@ def train_smart_money_model(trades, voting_scores=None):
         'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
         'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
     ]
-    fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
+    
+    # Smart Money يتعلم: متى الأكابر يدخلون (ربح كبير)
+    def label(t):
+        trade_quality = t.get('trade_quality', '')
+        profit = float(t.get('profit_percent', 0))
+        return 1 if trade_quality == 'GREAT' or profit > 1.5 else 0
+    
+    fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("⚠️ Not enough data for Smart Money")
         return None
 
     model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=150, max_depth=6, learning_rate=0.08)
-    print(f"🐋 Smart Money Model: Accuracy {accuracy*100:.2f}%")
+    print(f"🐋 Smart Money Model: Accuracy {accuracy*100:.2f}% | Learns: GREAT trades")
     return model, accuracy
 
 
 def train_risk_model(trades, voting_scores=None):
-    """🛡️ Train Risk Manager"""
+    """🛡️ Risk Manager - يتعلم يتجنب الأخطار
+    الوظيفة: اكتشاف الفخاخ والصفقات الخاسرة
+    الـ Label: صفقة فخ أو محفوفة بالمخاطر
+    """
     print("\n🛡️ Training Risk Model (LightGBM)...")
     scores = (voting_scores or {}).get('risk', {})
 
@@ -288,18 +301,27 @@ def train_risk_model(trades, voting_scores=None):
         'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
         'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
     ]
-    fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) < -1.0 else 0)
+    
+    # Risk يتعلم: كيف يكتشف الفخاخ (TRAP, RISKY)
+    def label(t):
+        trade_quality = t.get('trade_quality', '')
+        return 1 if trade_quality in ['TRAP', 'RISKY'] else 0
+    
+    fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("⚠️ Not enough data for Risk")
         return None
 
     model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=100, max_depth=5, learning_rate=0.1)
-    print(f"✅ Risk Model: Accuracy {accuracy*100:.2f}%")
+    print(f"🛡️ Risk Model: Accuracy {accuracy*100:.2f}% | Learns: TRAP/RISKY trades")
     return model, accuracy
 
 
 def train_anomaly_model(trades, voting_scores=None):
-    """🚨 Train Anomaly Detector"""
+    """🚨 Anomaly Detector - يكتشف الحالات الشاذة
+    الوظيفة: اكتشاف تذبذب غير طبيعي
+    الـ Label: صفقة محفوفة بالمخاطر
+    """
     print("\n🚨 Training Anomaly Model (LightGBM)...")
     scores = (voting_scores or {}).get('anomaly', {})
 
@@ -319,18 +341,28 @@ def train_anomaly_model(trades, voting_scores=None):
         'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
         'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
     ]
-    fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) < -1.5 else 0)
+    
+    # Anomaly يتعلم: كيف يكتشف الشذوذ (RISKY)
+    def label(t):
+        trade_quality = t.get('trade_quality', '')
+        profit = float(t.get('profit_percent', 0))
+        return 1 if trade_quality == 'RISKY' or profit < -0.5 else 0
+    
+    fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("⚠️ Not enough data for Anomaly")
         return None
 
     model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=100, max_depth=5, learning_rate=0.1)
-    print(f"✅ Anomaly Model: Accuracy {accuracy*100:.2f}%")
+    print(f"🚨 Anomaly Model: Accuracy {accuracy*100:.2f}% | Learns: RISKY trades")
     return model, accuracy
 
 
 def train_exit_model(trades, voting_scores=None):
-    """🎯 Train Exit Strategy"""
+    """🎯 Exit Strategy - يتعلم متى البيع
+    الوظيفة: اكتشاف الوقت المثالي للبيع
+    الـ Label: صفقة ناجحة (GOOD, GREAT) أو خسارة صغيرة
+    """
     print("\n🎯 Training Exit Model (LightGBM)...")
     scores = (voting_scores or {}).get('exit', {})
 
@@ -345,9 +377,10 @@ def train_exit_model(trades, voting_scores=None):
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ]
 
-    def label(trade):
-        p = float(trade.get('profit_percent', 0))
-        return 1 if (p > 1.0 or p < -1.0) else 0
+    # Exit يتعلم: متى البيع صح (ربح جيد أو خسارة مقبولة)
+    def label(t):
+        trade_quality = t.get('trade_quality', '')
+        return 1 if trade_quality in ['GREAT', 'GOOD'] else 0
 
     feature_names = [
         'rsi', 'macd', 'confidence', 'price_momentum', 'atr', 'ema_crossover',
@@ -360,12 +393,15 @@ def train_exit_model(trades, voting_scores=None):
         return None
 
     model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=100, max_depth=5, learning_rate=0.1)
-    print(f"✅ Exit Model: Accuracy {accuracy*100:.2f}%")
+    print(f"🎯 Exit Model: Accuracy {accuracy*100:.2f}% | Learns: GOOD/GREAT exits")
     return model, accuracy
 
 
 def train_pattern_model(trades, voting_scores=None):
-    """🧠 Train Pattern Recognition"""
+    """🧠 Pattern Recognition - يتعلم الأنماط الناجحة
+    الوظيفة: اكتشاف أنماط الشموع الصحيحة
+    الـ Label: صفقة ممتازة (GREAT only)
+    """
     print("\n🧠 Training Pattern Model (LightGBM)...")
     scores = (voting_scores or {}).get('pattern', {})
 
@@ -385,18 +421,27 @@ def train_pattern_model(trades, voting_scores=None):
         'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h',
         'tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
     ]
-    fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
+    
+    # Pattern يتعلم: الأنماط الناجحة فقط (GREAT)
+    def label(t):
+        trade_quality = t.get('trade_quality', '')
+        return 1 if trade_quality == 'GREAT' else 0
+    
+    fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("⚠️ Not enough data for Pattern")
         return None
 
     model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=150, max_depth=6, learning_rate=0.08)
-    print(f"✅ Pattern Model: Accuracy {accuracy*100:.2f}%")
+    print(f"🧠 Pattern Model: Accuracy {accuracy*100:.2f}% | Learns: GREAT patterns")
     return model, accuracy
 
 
 def train_liquidity_model(trades, voting_scores=None):
-    """💧 Train Liquidity Analyzer"""
+    """💧 Liquidity Analyzer - يتعلم السوائلة الجيدة
+    الوظيفة: اكتشاف العملات ذات السيولة الجيدة
+    الـ Label: عملة ذات سيولة جيدة (ربح > 0.8% و win rate > 55%)
+    """
     print("\n💧 Training Liquidity Model (LightGBM)...")
     scores = (voting_scores or {}).get('liquidity', {})
 
@@ -454,7 +499,8 @@ def train_liquidity_model(trades, voting_scores=None):
             scores.get('tp_accuracy', 0.5), scores.get('amount_accuracy', 0.5),
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ])
-        labels_list.append(1 if (avg_profit > 0.8 and win_rate > 0.55) else 0)
+        # Liquidity يتعلم: عملة ذات سيولة جيدة (ربح جيد و win rate عالي)
+        labels_list.append(1 if (avg_profit > 0.5 and win_rate > 0.50) else 0)
 
     feature_names = [
         'avg_profit', 
@@ -470,37 +516,63 @@ def train_liquidity_model(trades, voting_scores=None):
 
     model, accuracy = _train_lgb(features_list, np.array(labels_list), feature_names,
                                   n_estimators=200, max_depth=6, learning_rate=0.05)
-    print(f"💧 Liquidity Model: Accuracy {accuracy*100:.2f}%")
+    print(f"💧 Liquidity Model: Accuracy {accuracy*100:.2f}% | Learns: GOOD liquidity coins")
     return model, accuracy
 
 
 def train_chart_cnn_model(trades, voting_scores=None):
-    """📊 Train Chart Pattern Analyzer"""
+    """📊 Chart Pattern Analyzer - يتعلم أنماط الشارت
+    الوظيفة: تحليل أنماط الشارت البيانية
+    الـ Label: صفقة GOOD أو GREAT
+    """
     print("\n📊 Training Chart Pattern Model (LightGBM)...")
     scores = (voting_scores or {}).get('cnn', {})
 
     def features(data, trade):
-        base = calculate_enhanced_features(data)
+        base = calculate_enhanced_features(data, trade)
         base.extend([
             scores.get('tp_accuracy', 0.5),    scores.get('amount_accuracy', 0.5),
             scores.get('sl_accuracy', 0.5),     scores.get('sell_accuracy', 0.5),
         ])
         return base
 
-    # تم جلب أسماء الميزات الأساسية من ملف features.py
+    # الميزات الأساسية (30 من features.py)
     base_feature_names = [
         'rsi', 'macd', 'volume_ratio', 'price_momentum',
         'bb_position', 'atr_estimate', 'stochastic', 'ema_signal',
         'volume_strength', 'momentum_strength',
-        'atr', 'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h'
+        'atr', 'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h',
+        'trade_quality_score', 'advisor_vote_consensus', 'is_trap_trade',
+        'profit_magnitude', 'hours_held_normalized', 'is_profitable',
+        # Market Context & Time Features
+        'btc_trend_normalized', 'is_bullish_market', 'hour_normalized',
+        'is_asian_session', 'is_european_session', 'is_us_session', 'optimal_hold_score',
+        # Fibonacci Features
+        'fib_score', 'fib_level_encoded'
     ]
     feature_names = base_feature_names + ['tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy']
 
-    fl, ll = _build_dataset(trades, features, lambda t: 1 if float(t.get('profit_percent', 0)) > 0.8 else 0)
+    # Chart CNN يتعلم: أنماط الشارت الناجحة (GOOD, GREAT)
+    def label(t):
+        trade_quality = t.get('trade_quality', '')
+        return 1 if trade_quality in ['GREAT', 'GOOD'] else 0
+    
+    fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("⚠️ Not enough data for Chart Pattern")
         return None
 
     model, accuracy = _train_lgb(fl, np.array(ll), feature_names, n_estimators=150, max_depth=6, learning_rate=0.08)
-    print(f"📊 Chart Pattern Model: Accuracy {accuracy*100:.2f}%")
+    
+    # Feature Importance Tracking
+    try:
+        importances = model.feature_importances_
+        print(f"📊 Chart Pattern Model: Accuracy {accuracy*100:.2f}% | Learns: GOOD/GREAT charts")
+        print(f"   Top 5 features:")
+        sorted_idx = np.argsort(importances)[::-1][:5]
+        for i in sorted_idx:
+            print(f"   - {feature_names[i]}: {importances[i]:.1f}")
+    except:
+        print(f"📊 Chart Pattern Model: Accuracy {accuracy*100:.2f}% | Learns: GOOD/GREAT charts")
+    
     return model, accuracy
