@@ -8,12 +8,12 @@ from datetime import datetime
 
 def calculate_enhanced_features(data, trade=None):
     """
-    Feature Engineering: حساب مؤشرات إضافية (21 feature تقليدية + 7 ميزات جديدة)
+    Feature Engineering: حساب مؤشرات إضافية (38 feature)
     
-    الميزات التقليدية:
-    - RSI, MACD, Volume, Momentum, etc.
+    الميزات التقليدية (15):
+    - RSI, MACD, Volume, Momentum, ATR, EMA, etc.
     
-    الميزات الجديدة من التعلم المباشر:
+    الميزات من التعلم المباشر (6):
     - trade_quality_score: تقييم الجودة (1-5)
     - advisor_vote_consensus: توافق المستشارين (0-1)
     - is_trap_trade: هل كانت صفقة فخ (0/1)
@@ -21,7 +21,7 @@ def calculate_enhanced_features(data, trade=None):
     - hours_held_normalized: ساعات الاحتفاظ (0-2)
     - is_profitable: هل الربح إيجابي (0/1)
     
-    الميزات الجديدة من السوق والوقت:
+    الميزات من السوق والوقت (7):
     - btc_trend_1h: اتجاه BTC في الساعة الماضية
     - is_bullish_market: هل السوق صاعد (0/1)
     - hour_of_day: ساعة الدخول (0-23)
@@ -29,6 +29,18 @@ def calculate_enhanced_features(data, trade=None):
     - optimal_hold_score: درجة وقت الاحتفاظ المثالي
     - fib_score: قوة مستوى فيبوناتشي
     - fib_level_encoded: المستوى المشفر (0-6)
+    
+    الميزات من Market Regime (4):
+    - regime_score: نقاط حالة السوق (0-1)
+    - regime_adx: قوة الترند (0-1)
+    - volatility_ratio: نسبة التقلبات
+    - position_multiplier: مضاعف حجم المركز
+    
+    الميزات من Flash Crash Protection (4):
+    - flash_risk_score: درجة خطر السقوط (0-1)
+    - flash_crash_detected: تم اكتشاف سقوط مفاجئ (0/1)
+    - whale_dump_detected: تم اكتشاف بيع حيتان (0/1)
+    - cascade_risk_score: درجة خطر التصفية السلسلة (0-1)
     
     Args:
         data: قاموس البيانات التقنية (RSI, MACD, etc.)
@@ -172,6 +184,45 @@ def calculate_enhanced_features(data, trade=None):
         fib_level_map = {'0': 0, '23.6': 1, '38.2': 2, '50': 3, '61.8': 4, '78.6': 5, '100': 6}
         fib_level_encoded = fib_level_map.get(fib_level, 0) if fib_level else 0
 
+        # =========================================================
+        # 🎯 الميزات الجديدة: Market Regime Detection
+        # =========================================================
+        
+        # 14. Market Regime (حالة السوق)
+        market_regime = full_data.get('market_regime', {})
+        if isinstance(market_regime, str):
+            import json
+            market_regime = json.loads(market_regime)
+        
+        regime_map = {
+            'STRONG_UPTREND': 1.0,
+            'WEAK_TREND': 0.7,
+            'RANGING': 0.5,
+            'LOW_VOLATILITY': 0.4,
+            'HIGH_VOLATILITY': 0.3,
+            'STRONG_DOWNTREND': 0.0,
+            'UNKNOWN': 0.5
+        }
+        regime_score = regime_map.get(market_regime.get('regime', 'UNKNOWN'), 0.5)
+        regime_adx = market_regime.get('adx', 20) / 50.0  # Normalize 0-50 to 0-1
+        volatility_ratio = market_regime.get('volatility_ratio', 1.0)
+        position_multiplier = market_regime.get('trading_advice', {}).get('position_size', 1.0)
+        
+        # =========================================================
+        # 🚨 الميزات الجديدة: Flash Crash Protection
+        # =========================================================
+        
+        # 15. Flash Crash Protection (حماية السقوط المفاجئ)
+        flash_crash = full_data.get('flash_crash_protection', {})
+        if isinstance(flash_crash, str):
+            import json
+            flash_crash = json.loads(flash_crash)
+        
+        flash_risk_score = flash_crash.get('risk_score', 0) / 100.0  # Normalize 0-100 to 0-1
+        flash_crash_detected = 1 if flash_crash.get('flash_crash_detected', False) else 0
+        whale_dump_detected = 1 if flash_crash.get('whale_dump_detected', False) else 0
+        cascade_risk_score = flash_crash.get('cascade_risk', {}).get('score', 0) / 100.0
+        
         return [
             # 15 الميزات التقليدية
             rsi, macd, volume_ratio, price_momentum,
@@ -195,7 +246,17 @@ def calculate_enhanced_features(data, trade=None):
             optimal_hold_score,     # 28
             # 2 ميزات فيبوناتشي
             fib_score,              # 29
-            fib_level_encoded       # 30
+            fib_level_encoded,      # 30
+            # 4 ميزات Market Regime (جديد)
+            regime_score,           # 31
+            regime_adx,             # 32
+            volatility_ratio,       # 33
+            position_multiplier,    # 34
+            # 4 ميزات Flash Crash (جديد)
+            flash_risk_score,       # 35
+            flash_crash_detected,   # 36
+            whale_dump_detected,    # 37
+            cascade_risk_score      # 38
         ]
     except Exception as e:
         print(f"⚠️ Feature calculation error: {e}")
