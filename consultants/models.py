@@ -536,7 +536,7 @@ def train_chart_cnn_model(trades, voting_scores=None):
         ])
         return base
 
-    # الميزات الأساسية (30 من features.py)
+    # الميزات الأساسية (34 من features.py)
     base_feature_names = [
         'rsi', 'macd', 'volume_ratio', 'price_momentum',
         'bb_position', 'atr_estimate', 'stochastic', 'ema_signal',
@@ -548,7 +548,11 @@ def train_chart_cnn_model(trades, voting_scores=None):
         'btc_trend_normalized', 'is_bullish_market', 'hour_normalized',
         'is_asian_session', 'is_european_session', 'is_us_session', 'optimal_hold_score',
         # Fibonacci Features
-        'fib_score', 'fib_level_encoded'
+        'fib_score', 'fib_level_encoded',
+        # Market Regime Features (جديد)
+        'regime_score', 'regime_adx', 'volatility_ratio', 'position_multiplier',
+        # Flash Crash Protection Features (جديد)
+        'flash_risk_score', 'flash_crash_detected', 'whale_dump_detected', 'cascade_risk_score'
     ]
     feature_names = base_feature_names + ['tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy']
 
