@@ -95,10 +95,8 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
             print("⚠️ No trades found to train the Meta-Learner.")
             return None
         
-        # تحديد الحد الأقصى للصفقات (2000 صفقة)
-        max_trades_limit = 2000
-        trades_to_process = min(total_trades, max_trades_limit)
-        print(f"📈 Found {total_trades} total trades. Processing {trades_to_process} recent trades for the King.")
+        trades_to_process = total_trades
+        print(f"📈 Found {total_trades} total trades. Processing all for the King.")
 
     except Exception as e:
         print(f"❌ Error loading initial data for Meta-Learner: {e}")
@@ -110,7 +108,7 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
     final_labels = []
     consultant_models = {k: v for k, v in trained_models.items() if k != 'meta_learner' and v is not None}
 
-    print(f"  -> Processing {trades_to_process} recent trades for King...")
+    print(f"  -> Processing all {trades_to_process} trades for King...")
     try:
         trades_batch = db_manager.load_training_data(limit=trades_to_process)
         if trades_batch:
