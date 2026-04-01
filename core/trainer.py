@@ -50,16 +50,58 @@ class DeepLearningTrainerXGBoost:
     def __init__(self):
         self.db     = DatabaseManager()
         self.models = {name: None for name, _ in TRAIN_PIPELINE}
+        self._load_models_from_db()  # تحميل النماذج عند بداية التشغيل
+
+    def _load_models_from_db(self):
+        """Load existing models from database on startup."""
+        try:
+            conn = self.db._get_conn()
+            if not conn:
+                return
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM dl_models_v2")
+                count = cursor.fetchone()[0]
+            close_db_connection(conn)
+
+            if count == 0:
+                print("ℹ️ No saved models found. Will train from scratch.")
+                return
+
+            print(f"✅ Found {count} saved models in database. Loading...")
+            base_dir = os.path.dirname(os.path.dirname(__file__))
+            trained_models_dir = os.path.join(base_dir, 'trained_models')
+
+            loaded = 0
+            for model_name in self.models.keys():
+                path = os.path.join(trained_models_dir, f'{model_name}_model.pkl')
+                if os.path.exists(path):
+                    with open(path, 'rb') as f:
+                        self.models[model_name] = pickle.load(f)
+                    loaded += 1
+
+            print(f"✅ Loaded {loaded}/{len(self.models)} models from disk.")
+
+        except Exception as e:
+            print(f"⚠️ Could not load models from DB: {e}")
 
 
     # ========== Training ==========
 
     def train_all_models(self):
-        """Train all models sequentially, with Meta-Learner at the end."""
+        """Train all models - only on new trades since last training."""
         print("\n" + "=" * 60)
         print("👑 Starting Training - 12 LightGBM Models")
         print("=" * 60)
 
+        # فحص الصفقات الجديدة منذ آخر تدريب
+        new_trades_count = self.db.get_new_trades_count()
+        print(f"📊 New trades since last training: {new_trades_count}")
+
+        if new_trades_count == 0:
+            print("⏭️ No new trades found. Skipping training cycle.")
+            return False
+
+        print(f"✅ Found {new_trades_count} new trades. Starting training...")
         trades = self.db.load_training_data()
         if not trades:
             return False
@@ -127,7 +169,7 @@ class DeepLearningTrainerXGBoost:
 
     # ========== Continuous Loop ==========
 
-    def run_continuous(self, interval_hours=12):
+    def run_continuous(self, interval_hours=6):
         """Run training loop — trains immediately, then every N hours."""
         print(f"\n🚀 Deep Learning Trainer V2 started (LightGBM)!")
         print(f"⏰ Training triggers: Immediately, then every {interval_hours} hours.")
