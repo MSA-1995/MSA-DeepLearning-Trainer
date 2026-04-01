@@ -27,7 +27,7 @@ class DatabaseManager:
 
     # ========== Load ==========
 
-    def load_training_data(self, limit=None, offset=None):
+    def load_training_data(self, limit=1500, offset=None):
         """Load historical SELL trades for training, with support for batching."""
         conn = self._get_conn()
         if not conn:
@@ -40,7 +40,7 @@ class DatabaseManager:
                 FROM trades_history
                 WHERE action = 'SELL'
                   AND data IS NOT NULL
-                ORDER BY timestamp ASC
+                ORDER BY timestamp DESC
             """
             params = []
             if limit is not None:
@@ -60,7 +60,7 @@ class DatabaseManager:
                 if len(trades) < self.min_trades_for_training:
                     print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
                     return None
-                print(f"📊 Loaded initial batch of {len(trades)} trades for training")
+                print(f"📊 Loaded {len(trades)} recent trades for training (limit: {limit})")
             
             return trades
         except Exception as e:
