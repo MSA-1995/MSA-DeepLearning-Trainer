@@ -127,7 +127,7 @@ class DeepLearningTrainerXGBoost:
 
     # ========== Continuous Loop ==========
 
-    def run_continuous(self, interval_hours=6):
+    def run_continuous(self, interval_hours=12):
         """Run training loop — trains immediately, then every N hours."""
         print(f"\n🚀 Deep Learning Trainer V2 started (LightGBM)!")
         print(f"⏰ Training triggers: Immediately, then every {interval_hours} hours.")
