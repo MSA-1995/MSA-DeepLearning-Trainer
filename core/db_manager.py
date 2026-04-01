@@ -33,40 +33,38 @@ class DatabaseManager:
         if not conn:
             return None
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
-            query = """
-                SELECT symbol, profit_percent, action, timestamp, data
-                FROM trades_history
-                WHERE action = 'SELL'
-                  AND data IS NOT NULL
-                ORDER BY timestamp DESC
-            """
-            params = []
-            if limit is not None:
-                query += " LIMIT %s"
-                params.append(limit)
-            if offset is not None:
-                query += " OFFSET %s"
-                params.append(offset)
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                query = """
+                    SELECT symbol, profit_percent, action, timestamp, data
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND data IS NOT NULL
+                    ORDER BY timestamp DESC
+                """
+                params = []
+                if limit is not None:
+                    query += " LIMIT %s"
+                    params.append(limit)
+                if offset is not None:
+                    query += " OFFSET %s"
+                    params.append(offset)
 
-            cursor.execute(query, tuple(params))
-            trades = cursor.fetchall()
-            cursor.close()
-            close_db_connection(conn)
+                cursor.execute(query, tuple(params))
+                trades = cursor.fetchall()
 
-            # For the first batch, check the minimum requirement
-            if offset is None or offset == 0:
-                if len(trades) < self.min_trades_for_training:
-                    print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
-                    return None
-                print(f"📊 Loaded {len(trades)} recent trades for training (limit: {limit})")
+                # For the first batch, check the minimum requirement
+                if offset is None or offset == 0:
+                    if len(trades) < self.min_trades_for_training:
+                        print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
+                        return None
+                    print(f"📊 Loaded {len(trades)} recent trades for training (limit: {limit})")
             
             return trades
         except Exception as e:
             print(f"❌ Error loading data: {e}")
-            close_db_connection(conn)
             return None
+        finally:
+            close_db_connection(conn)
 
     def get_total_trades_count(self):
         """Get the total number of SELL trades available for training."""
@@ -74,21 +72,20 @@ class DatabaseManager:
         if not conn:
             return 0
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*)
-                FROM trades_history
-                WHERE action = 'SELL'
-                  AND data IS NOT NULL
-            """)
-            count = cursor.fetchone()[0]
-            cursor.close()
-            close_db_connection(conn)
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND data IS NOT NULL
+                """)
+                count = cursor.fetchone()[0]
             return count
         except Exception as e:
             print(f"❌ Error getting total trades count: {e}")
-            close_db_connection(conn)
             return 0
+        finally:
+            close_db_connection(conn)
 
     def load_ai_decisions(self, limit=1000):
         """Load historical decisions from ai_decisions table."""
@@ -96,25 +93,22 @@ class DatabaseManager:
         if not conn:
             return []
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            # This table has no 'reasons' or 'created_at' column, so it's removed.
-            cursor.execute("""
-                SELECT symbol, decision, confidence, timestamp
-                FROM ai_decisions
-                WHERE decision IN ('BUY', 'SELL')
-                ORDER BY id DESC
-                LIMIT %s
-            """, (limit,))
-            decisions = cursor.fetchall()
-            cursor.close()
-            close_db_connection(conn)
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT symbol, decision, confidence, timestamp
+                    FROM ai_decisions
+                    WHERE decision IN ('BUY', 'SELL')
+                    ORDER BY id DESC
+                    LIMIT %s
+                """, (limit,))
+                decisions = cursor.fetchall()
             print(f"🧠 Loaded {len(decisions)} historical AI decisions.")
             return decisions
         except Exception as e:
             print(f"❌ Error loading AI decisions: {e}")
-            if conn:
-                close_db_connection(conn)
             return []
+        finally:
+            close_db_connection(conn)
 
     def load_traps(self, limit=500):
         """Load data from the trap_memory table."""
@@ -122,23 +116,21 @@ class DatabaseManager:
         if not conn:
             return []
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("""
-                SELECT symbol, data, timestamp
-                FROM trap_memory
-                ORDER BY timestamp DESC
-                LIMIT %s
-            """, (limit,))
-            traps = cursor.fetchall()
-            cursor.close()
-            close_db_connection(conn)
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT symbol, data, timestamp
+                    FROM trap_memory
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (limit,))
+                traps = cursor.fetchall()
             print(f"🪤 Loaded {len(traps)} records from trap memory.")
             return traps
         except Exception as e:
             print(f"❌ Error loading trap memory: {e}")
-            if conn:
-                close_db_connection(conn)
             return []
+        finally:
+            close_db_connection(conn)
 
     def load_trades(self, limit=2000):
         """Load all types of trades from trades_history table."""
@@ -146,40 +138,37 @@ class DatabaseManager:
         if not conn:
             return []
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("""
-                SELECT symbol, profit_percent, action, timestamp, data
-                FROM trades_history
-                ORDER BY timestamp DESC
-                LIMIT %s
-            """, (limit,))
-            trades = cursor.fetchall()
-            cursor.close()
-            close_db_connection(conn)
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT symbol, profit_percent, action, timestamp, data
+                    FROM trades_history
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (limit,))
+                trades = cursor.fetchall()
             print(f"📜 Loaded {len(trades)} records from trades history.")
             return trades
         except Exception as e:
             print(f"❌ Error loading trades history: {e}")
-            if conn:
-                close_db_connection(conn)
             return []
+        finally:
+            close_db_connection(conn)
 
     def calculate_voting_accuracy(self, trades):
         """حساب دقة تصويت المستشارين من جدول consultant_votes"""
         print("\n🎯 Calculating voting accuracy from database...")
+        conn = self._get_conn()
+        if not conn:
+            return {}
         try:
-            conn   = self._get_conn()
-            if not conn:
-                return {}
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
-                FROM consultant_votes
-                WHERE timestamp > NOW() - INTERVAL '30 days'
-                GROUP BY consultant_name, vote_type, is_correct
-            """)
-            rows = cursor.fetchall()
-            cursor.close()
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
+                    FROM consultant_votes
+                    WHERE timestamp > NOW() - INTERVAL '30 days'
+                    GROUP BY consultant_name, vote_type, is_correct
+                """)
+                rows = cursor.fetchall()
 
             consultant_scores = {}
             for row in rows:
@@ -228,8 +217,9 @@ class DatabaseManager:
 
         except Exception as e:
             print(f"⚠️ Error calculating voting accuracy: {e}")
-            close_db_connection(conn)
             return {}
+        finally:
+            close_db_connection(conn)
 
     # ========== Save ==========
 
@@ -315,28 +305,25 @@ class DatabaseManager:
 
     def get_new_trades_count(self):
         """عدد الصفقات الجديدة منذ آخر تدريب"""
+        conn = self._get_conn()
+        if not conn:
+            return 0
         try:
-            conn   = self._get_conn()
-            if not conn:
-                return 0
-            cursor = conn.cursor()
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT MAX(trained_at) FROM dl_models_v2")
+                result        = cursor.fetchone()
+                last_training = result[0] if result and result[0] else datetime.now() - timedelta(days=30)
 
-            cursor.execute("SELECT MAX(trained_at) FROM dl_models_v2")
-            result        = cursor.fetchone()
-            last_training = result[0] if result and result[0] else datetime.now() - timedelta(days=30)
-
-            cursor.execute("""
-                SELECT COUNT(*)
-                FROM trades_history
-                WHERE action = 'SELL'
-                  AND timestamp > %s
-            """, (last_training,))
-            new_trades = cursor.fetchone()[0]
-            cursor.close()
-            close_db_connection(conn)
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND timestamp > %s
+                """, (last_training,))
+                new_trades = cursor.fetchone()[0]
             return new_trades
-
         except Exception as e:
             print(f"⚠️ Error counting new trades: {e}")
-            close_db_connection(conn)
             return 0
+        finally:
+            close_db_connection(conn)
