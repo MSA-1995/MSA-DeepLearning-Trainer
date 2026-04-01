@@ -103,8 +103,8 @@ def main():
     try:
         # --- بدء عملية التدريب ---
         trainer = DeepLearningTrainerXGBoost()
-        # Train immediately, then every 6 hours.
-        trainer.run_continuous(interval_hours=6)
+        # Train immediately, then every 12 hours.
+        trainer.run_continuous(interval_hours=12)
 
     except Exception as e:
         print(f"❌ An unexpected error occurred in the main execution: {e}")
