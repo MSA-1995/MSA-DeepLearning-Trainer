@@ -17,7 +17,7 @@ def get_db_connection():
                 raise ValueError("DATABASE_URL environment variable not set.")
             
             _db_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 10, dsn=database_url,
+                1, 5, dsn=database_url,
                 connect_timeout=5
             )
             print("✅ Database connection pool created.")
