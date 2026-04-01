@@ -51,157 +51,124 @@ def _train_lgb(X, y, feature_names, n_estimators=100, max_depth=5, learning_rate
 
 
 def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
-    """👑🧠 Train the Meta-Learner (The New King) all at once.
-     يتعلم من قرارات المستشارين الآخرين لاتخاذ قرار نهائي أكثر ذكاءً
-    """
+    """👑🧠 Train the Meta-Learner (The New King) - يتعلم بشكل مستقل من كل البيانات"""
     print("\n👑🧠 Training Meta-Learner Model (The New King)...")
 
     if not trained_models or len(trained_models) < 7:
         print("⚠️ Not enough trained consultant models to train the Meta-Learner.")
         return None
-    
-    # استيراد النماذج الجديدة
-    try:
-        import sys
-        import os
-        # Add parent directory to path for imports
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        
-        from models.sentiment_model import SentimentAnalyzer
-        from models.crypto_news_model import CryptoNewsAnalyzer
-        from models.volume_prediction_model import VolumePredictor
-        sentiment_analyzer = SentimentAnalyzer()
-        news_analyzer = CryptoNewsAnalyzer()
-        volume_predictor = VolumePredictor()
-    except Exception as e:
-        print(f"⚠️ Could not load new models: {e}")
-        sentiment_analyzer = None
-        news_analyzer = None
-        volume_predictor = None
 
-    # 1. تحميل البيانات المساعدة (قرارات براين، الأفخاخ) مرة واحدة
     print("Loading auxiliary data (AI decisions, traps)...")
     try:
-        ai_decisions = db_manager.load_ai_decisions(limit=50000)
         trap_memory = db_manager.load_traps(limit=10000)
-        ai_decisions_df = pd.DataFrame(ai_decisions)
         trap_memory_df = pd.DataFrame(trap_memory)
-        
-        # الحصول على العدد الإجمالي للصفقات
+
         total_trades = db_manager.get_total_trades_count()
         if total_trades == 0:
             print("⚠️ No trades found to train the Meta-Learner.")
             return None
-        
-        trades_to_process = total_trades
         print(f"📈 Found {total_trades} total trades. Processing all for the King.")
-
     except Exception as e:
         print(f"❌ Error loading initial data for Meta-Learner: {e}")
-        print("💡 Hint: Make sure the 'get_total_trades_count' method is implemented in db_manager.py")
         return None
 
-    # 2. بناء مجموعة البيانات دفعة واحدة
+    consultant_models = {k: v for k, v in trained_models.items() if k != 'meta_learner' and v is not None}
     meta_features = []
     final_labels = []
-    consultant_models = {k: v for k, v in trained_models.items() if k != 'meta_learner' and v is not None}
 
-    print(f"  -> Processing all {trades_to_process} trades for King...")
+    print(f"  -> Processing all {total_trades} trades for King...")
     try:
-        trades_batch = db_manager.load_training_data(limit=trades_to_process)
-        if trades_batch:
-            trades_df = pd.DataFrame([dict(t) for t in trades_batch])
+        trades_batch = db_manager.load_training_data(limit=total_trades)
+        if not trades_batch:
+            return None
 
-            for index, trade in trades_df.iterrows():
-                try:
-                    data = trade.get('data', {})
-                    if isinstance(data, str):
-                        data = json.loads(data)
+        trades_df = pd.DataFrame([dict(t) for t in trades_batch])
 
-                    consultant_opinions = [data.get(f'{model_name}_score', 0.5) for model_name in consultant_models.keys()]
-                    
-                    # حساب دقة كل مستشار (جديد)
-                    consultant_accuracies = []
-                    for model_name in consultant_models.keys():
-                        accuracy_key = f'{model_name}_accuracy'
-                        accuracy = voting_scores.get(model_name, {}).get('accuracy', 0.5) if voting_scores else 0.5
-                        consultant_accuracies.append(accuracy)
-                    
-                    # حساب تقلب أداء المستشارين (جديد)
-                    consultant_volatility = np.std(consultant_opinions) if len(consultant_opinions) > 1 else 0
-                    
-                    symbol = trade['symbol']
-                    buy_time = None
-                    if 'buy_time' in trade and pd.notna(trade['buy_time']):
-                        buy_time = pd.to_datetime(trade['buy_time'])
-                    else:
-                        trade_time = pd.to_datetime(trade['timestamp'])
-                        decisions_before_trade = ai_decisions_df[
-                            (ai_decisions_df['symbol'] == symbol) &
-                            (ai_decisions_df['decision'] == 'BUY') &
-                            (pd.to_datetime(ai_decisions_df['timestamp']) < trade_time)
-                        ]
-                        if not decisions_before_trade.empty:
-                            last_buy_decision = decisions_before_trade.sort_values('timestamp', ascending=False).iloc[0]
-                            buy_time = pd.to_datetime(last_buy_decision['timestamp'])
+        # حساب عدد الفخاخ لكل عملة
+        trap_counts = {}
+        if not trap_memory_df.empty and 'symbol' in trap_memory_df.columns:
+            trap_counts = trap_memory_df['symbol'].value_counts().to_dict()
 
-                    # إذا لم يتم العثور على buy_time، استخدم وقت الصفقة
-                    if buy_time is None:
-                        buy_time = pd.to_datetime(trade['timestamp'])
+        for index, trade in trades_df.iterrows():
+            try:
+                data = trade.get('data', {})
+                if isinstance(data, str):
+                    data = json.loads(data)
 
-                    relevant_decision = None
-                    if not ai_decisions_df.empty:
-                        decisions_before_buy = ai_decisions_df[
-                            (ai_decisions_df['symbol'] == symbol) &
-                            (pd.to_datetime(ai_decisions_df['timestamp']) < buy_time)
-                        ]
-                        if not decisions_before_buy.empty:
-                            relevant_decision = decisions_before_buy.sort_values('timestamp', ascending=False).iloc[0]
+                symbol = trade['symbol']
 
-                    brain_confidence = relevant_decision['confidence'] if relevant_decision is not None else 50
-                    
-                    was_trapped = False
-                    if not trap_memory_df.empty:
-                        was_trapped = not trap_memory_df[
-                            (trap_memory_df['symbol'] == symbol) &
-                            (pd.to_datetime(trap_memory_df['timestamp']) > buy_time - pd.Timedelta(hours=24)) &
-                            (pd.to_datetime(trap_memory_df['timestamp']) < buy_time)
-                        ].empty
-                    
-                    # تأثير الأخبار (جديد)
-                    news_impact = 0
-                    if news_analyzer:
-                        news_data = data.get('news', {})
-                        news_impact = news_analyzer.get_news_impact_score(news_data)
-                    
-                    # حالة السوق الاستثنائية (جديد)
-                    is_black_swan = 0
-                    if sentiment_analyzer:
-                        sentiment_data = data.get('sentiment', {})
-                        sentiment_score = sentiment_analyzer.get_sentiment_score(sentiment_data)
-                        is_black_swan = 1 if abs(sentiment_score) > 80 else 0
-                    
-                    # احتمالية زيادة الحجم (جديد)
-                    volume_spike_prob = 0
-                    if volume_predictor:
-                        volume_spike_prob = volume_predictor.get_volume_spike_probability(data)
-                    
-                    # بناء الميزات المحسنة
-                    features = (
-                        consultant_opinions +  # آراء المستشارين
-                        consultant_accuracies +  # دقة المستشارين (جديد)
-                        [brain_confidence, 1 if was_trapped else 0] +  # الميزات القديمة
-                        [consultant_volatility, news_impact, is_black_swan, volume_spike_prob]  # الميزات الجديدة
-                    )
-                    meta_features.append(features)
-                    final_labels.append(1 if float(trade.get('profit_percent', 0)) > 0.8 else 0)
+                # ========== 1. البيانات التقنية (الأساس) ==========
+                rsi            = data.get('rsi', 50)
+                macd           = data.get('macd', 0)
+                volume_ratio   = data.get('volume_ratio', 1)
+                price_momentum = data.get('price_momentum', 0)
+                atr            = data.get('atr', 1)
+                ema_crossover  = data.get('ema_crossover', 0)
+                bid_ask_spread = data.get('bid_ask_spread', 0)
+                volume_trend   = data.get('volume_trend', 0)
+                price_change_1h = data.get('price_change_1h', 0)
+                confidence     = data.get('confidence', 60)
 
-                except Exception as e_inner:
-                    # This will silently skip a single problematic trade
-                    continue
-        
+                # ========== 2. الشموع والأنماط ==========
+                # نمط الشمعة (من trade_quality)
+                trade_quality  = trade.get('trade_quality', 'OK')
+                is_great       = 1 if trade_quality == 'GREAT' else 0
+                is_trap        = 1 if trade_quality in ['TRAP', 'RISKY'] else 0
+                hours_held     = float(trade.get('hours_held', 24))
+
+                # ========== 3. الأخبار والمشاعر ==========
+                news_data      = data.get('news', {})
+                news_score     = news_data.get('news_score', 0)
+                news_positive  = news_data.get('positive', 0)
+                news_negative  = news_data.get('negative', 0)
+                news_total     = news_data.get('total', 0)
+
+                sentiment_data = data.get('sentiment', {})
+                sentiment_score = sentiment_data.get('news_sentiment', 0)
+
+                # ========== 4. السيولة ==========
+                liquidity_data  = data.get('liquidity', {})
+                liquidity_score = liquidity_data.get('liquidity_score', 50)
+                depth_ratio     = liquidity_data.get('depth_ratio', 1.0)
+                price_impact    = liquidity_data.get('price_impact', 0.5)
+
+                # ========== 5. تاريخ العملة (الفخاخ) ==========
+                trap_count     = trap_counts.get(symbol, 0)
+                was_trapped    = 1 if trap_count > 0 else 0
+                is_repeat_trap = 1 if trap_count >= 3 else 0
+
+                # ========== 6. آراء المستشارين (كمرجع) ==========
+                consultant_opinions = [data.get(f'{name}_score', 0.5) for name in consultant_models.keys()]
+                consultant_votes_buy  = data.get('buy_votes', {})
+                consultant_votes_sell = data.get('sell_votes', {})
+                buy_vote_count  = sum(1 for v in consultant_votes_buy.values() if v == 1) if consultant_votes_buy else 0
+                sell_vote_count = sum(1 for v in consultant_votes_sell.values() if v == 1) if consultant_votes_sell else 0
+                consultant_consensus = buy_vote_count / 7.0
+
+                # ========== بناء الميزات الكاملة ==========
+                features = [
+                    # البيانات التقنية
+                    rsi, macd, volume_ratio, price_momentum,
+                    atr, ema_crossover, bid_ask_spread, volume_trend,
+                    price_change_1h, confidence,
+                    # الشموع والصفقة
+                    is_great, is_trap, hours_held,
+                    # الأخبار والمشاعر
+                    news_score, news_positive, news_negative, news_total, sentiment_score,
+                    # السيولة
+                    liquidity_score, depth_ratio, price_impact,
+                    # تاريخ العملة
+                    trap_count, was_trapped, is_repeat_trap,
+                    # آراء المستشارين
+                    consultant_consensus, buy_vote_count, sell_vote_count,
+                ] + consultant_opinions
+
+                meta_features.append(features)
+                final_labels.append(1 if float(trade.get('profit_percent', 0)) > 0.8 else 0)
+
+            except Exception as e_inner:
+                continue
+
     except Exception as e_outer:
         print(f"❌ Failed to process trades: {e_outer}")
 
@@ -209,26 +176,34 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
         print(f"⚠️ Not enough data for Meta-Learner ({len(meta_features)} trades found)")
         return None
 
-    # 3. تدريب الملك الجديد
     print(f"\nCollected {len(meta_features)} samples. Now training the King...")
-    
-    # تحديد أسماء الميزات للملك (محسنة)
-    meta_feature_names = (
-        [f'consultant_{name}' for name in consultant_models.keys()] +  # آراء المستشارين
-        [f'consultant_{name}_accuracy' for name in consultant_models.keys()] +  # دقة المستشارين
-        ['brain_confidence', 'was_trapped'] +  # الميزات القديمة
-        ['consultant_volatility', 'news_impact', 'is_black_swan', 'volume_spike_prob']  # الميزات الجديدة
-    )
+
+    meta_feature_names = [
+        # البيانات التقنية
+        'rsi', 'macd', 'volume_ratio', 'price_momentum',
+        'atr', 'ema_crossover', 'bid_ask_spread', 'volume_trend',
+        'price_change_1h', 'confidence',
+        # الشموع والصفقة
+        'is_great', 'is_trap', 'hours_held',
+        # الأخبار والمشاعر
+        'news_score', 'news_positive', 'news_negative', 'news_total', 'sentiment_score',
+        # السيولة
+        'liquidity_score', 'depth_ratio', 'price_impact',
+        # تاريخ العملة
+        'trap_count', 'was_trapped', 'is_repeat_trap',
+        # آراء المستشارين
+        'consultant_consensus', 'buy_vote_count', 'sell_vote_count',
+    ] + [f'consultant_{name}' for name in consultant_models.keys()]
 
     model, accuracy = _train_lgb(
         meta_features,
         np.array(final_labels),
         feature_names=meta_feature_names,
-        n_estimators=300, 
-        max_depth=5,
+        n_estimators=300,
+        max_depth=6,
         learning_rate=0.03
     )
-    
+
     print(f"👑🧠 Meta-Learner Model: Accuracy {accuracy*100:.2f}%")
     return model, accuracy
 
@@ -328,20 +303,30 @@ def train_anomaly_model(trades, voting_scores=None):
     scores = (voting_scores or {}).get('anomaly', {})
 
     def features(data, trade):
+        rsi = data.get('rsi', 50)
+        volume_ratio = data.get('volume_ratio', 1)
+        atr = data.get('atr', 1)
+        price_momentum = data.get('price_momentum', 0)
+        # ميزات الشذوذ الحقيقية
+        rsi_extreme = 1 if rsi < 20 or rsi > 80 else 0
+        volume_spike = 1 if volume_ratio > 3.0 else 0
+        momentum_extreme = 1 if abs(price_momentum) > 5 else 0
         return [
-            data.get('rsi', 50),           data.get('macd', 0),
-            data.get('volume_ratio', 1),    data.get('price_momentum', 0),
-            data.get('atr', 1),             data.get('ema_crossover', 0),
-            data.get('bid_ask_spread', 0),  data.get('volume_trend', 0),
+            rsi, data.get('macd', 0),
+            volume_ratio, price_momentum,
+            atr, data.get('ema_crossover', 0),
+            data.get('bid_ask_spread', 0), data.get('volume_trend', 0),
             data.get('price_change_1h', 0),
+            rsi_extreme, volume_spike, momentum_extreme,
             scores.get('tp_accuracy', 0.5), scores.get('amount_accuracy', 0.5),
             scores.get('sl_accuracy', 0.5), scores.get('sell_accuracy', 0.5),
         ]
 
     feature_names = [
         'rsi', 'macd', 'volume_ratio', 'price_momentum', 'atr', 'ema_crossover',
-        'bid_ask_spread', 'volume_trend', 'price_change_1h', 'tp_accuracy', 
-        'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
+        'bid_ask_spread', 'volume_trend', 'price_change_1h',
+        'rsi_extreme', 'volume_spike', 'momentum_extreme',
+        'tp_accuracy', 'amount_accuracy', 'sl_accuracy', 'sell_accuracy'
     ]
     
     # Anomaly يتعلم: كيف يكتشف الشذوذ (RISKY)
