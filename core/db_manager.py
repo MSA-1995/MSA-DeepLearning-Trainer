@@ -27,7 +27,7 @@ class DatabaseManager:
 
     # ========== Load ==========
 
-    def load_training_data(self, limit=1500, offset=None):
+    def load_training_data(self, limit=None, offset=None):
         """Load historical SELL trades for training, with support for batching."""
         conn = self._get_conn()
         if not conn:
@@ -52,12 +52,11 @@ class DatabaseManager:
                 cursor.execute(query, tuple(params))
                 trades = cursor.fetchall()
 
-                # For the first batch, check the minimum requirement
                 if offset is None or offset == 0:
                     if len(trades) < self.min_trades_for_training:
                         print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
                         return None
-                    print(f"📊 Loaded {len(trades)} recent trades for training (limit: {limit})")
+                    print(f"📊 Loaded {len(trades)} trades for training")
             
             return trades
         except Exception as e:
