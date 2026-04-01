@@ -303,23 +303,43 @@ class DatabaseManager:
         return False
 
     def get_new_trades_count(self):
-        """عدد الصفقات الجديدة منذ آخر تدريب"""
+        """عدد الصفقات الجديدة منذ آخر تدريب - يفحص كل نموذج بشكل مستقل"""
         conn = self._get_conn()
         if not conn:
             return 0
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT MAX(trained_at) FROM dl_models_v2")
-                result        = cursor.fetchone()
-                last_training = result[0] if result and result[0] else datetime.now() - timedelta(days=30)
+                # جلب آخر trained_at لكل نموذج بشكل مستقل
+                cursor.execute("""
+                    SELECT model_name, trained_at 
+                    FROM dl_models_v2 
+                    ORDER BY trained_at ASC
+                """)
+                rows = cursor.fetchall()
 
+                if not rows:
+                    # لا يوجد أي نموذج → تدريب من الصفر
+                    print("ℹ️ No models found → will train from scratch")
+                    return 999999
+
+                # أقدم trained_at بين كل النماذج
+                oldest_training = rows[0][1]
+                missing_models  = 11 - len(rows)  # 11 نموذج مطلوب
+
+                if missing_models > 0:
+                    # فيه نماذج ناقصة → تدريب من الصفر لها
+                    print(f"ℹ️ {missing_models} models missing → will retrain all")
+                    return 999999
+
+                # كل النماذج موجودة → فحص الصفقات الجديدة منذ أقدم تدريب
                 cursor.execute("""
                     SELECT COUNT(*)
                     FROM trades_history
                     WHERE action = 'SELL'
                       AND timestamp > %s
-                """, (last_training,))
+                """, (oldest_training,))
                 new_trades = cursor.fetchone()[0]
+
             return new_trades
         except Exception as e:
             print(f"⚠️ Error counting new trades: {e}")
