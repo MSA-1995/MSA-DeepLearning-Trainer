@@ -273,9 +273,9 @@ class SentimentAnalyzer:
         return max(-100, min(100, score))
 
 
-def train_sentiment_model(trades, voting_scores=None):
+def train_sentiment_model(trades, voting_scores=None, since_timestamp=None):
     analyzer = SentimentAnalyzer()
-    result = analyzer.train(trades, voting_scores)
+    result = analyzer.train(trades, voting_scores, since_timestamp=since_timestamp)
     if result:
         return result[0], result[1]
     return None
