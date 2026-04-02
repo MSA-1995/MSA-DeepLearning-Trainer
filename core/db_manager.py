@@ -238,7 +238,7 @@ class DatabaseManager:
 
                 print(f"🔄 Attempt {attempt+1}/{retry}: Saving models to database...")
                 with conn.cursor() as cursor:
-                    cursor.execute("SET statement_timeout = '600s';")
+                    cursor.execute("SET statement_timeout = '300s';")
                     # Step 1: Create the table if it doesn't already exist.
                     cursor.execute("""
                         CREATE TABLE IF NOT EXISTS dl_models_v2 (
