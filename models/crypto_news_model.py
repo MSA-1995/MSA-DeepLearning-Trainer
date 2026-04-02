@@ -252,9 +252,9 @@ class CryptoNewsAnalyzer:
         return proba[1] if len(proba) > 1 else 0.5
 
 
-def train_crypto_news_model(trades, voting_scores=None):
+def train_crypto_news_model(trades, voting_scores=None, since_timestamp=None):
     analyzer = CryptoNewsAnalyzer()
-    result = analyzer.train(trades, voting_scores)
+    result = analyzer.train(trades, voting_scores, since_timestamp=since_timestamp)
     if result:
         return result[0], result[1]
     return None
