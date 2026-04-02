@@ -128,6 +128,10 @@ class DeepLearningTrainerLightGBM:
                 if not trades_new or len(trades_new) == 0:
                     print("⏭️ No new trades found. Skipping training cycle.")
                     return False
+                # Minimum 50 trades required for quality training
+                if len(trades_new) < 50:
+                    print(f"⏭️ Only {len(trades_new)} new trades found. Waiting for at least 50 trades before training.")
+                    return False
                 trades_all = None
         
         results = {}
