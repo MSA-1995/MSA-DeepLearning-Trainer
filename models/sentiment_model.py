@@ -1,13 +1,70 @@
 """
-🎭 Sentiment Analysis Model - تحليل مشاعر السوق
+Sentiment Analysis Model - reads directly from news_sentiment table
 """
 
+import os
 import json
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
+import psycopg2
+from urllib.parse import unquote
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except:
+    LIGHTGBM_AVAILABLE = False
+
+
+def get_sentiment_from_db(symbol, hours=24):
+    """Read sentiment data directly from news_sentiment table"""
+    try:
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            return None
+        
+        from urllib.parse import urlparse
+        parsed = urlparse(database_url)
+        conn = psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port,
+            database=parsed.path[1:],
+            user=parsed.username,
+            password=unquote(parsed.password)
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT sentiment, score 
+            FROM news_sentiment 
+            WHERE symbol = %s 
+            AND timestamp > NOW() - INTERVAL '%s hours'
+        """, (symbol, hours))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        if not rows:
+            return None
+        
+        positive = sum(1 for r in rows if r[0] == 'POSITIVE')
+        negative = sum(1 for r in rows if r[0] == 'NEGATIVE')
+        neutral = sum(1 for r in rows if r[0] == 'NEUTRAL')
+        total = len(rows)
+        
+        return {
+            'positive': positive,
+            'negative': negative,
+            'neutral': neutral,
+            'total': total,
+            'positive_ratio': positive / total if total > 0 else 0.33,
+            'negative_ratio': negative / total if total > 0 else 0.33,
+            'neutral_ratio': neutral / total if total > 0 else 0.34,
+            'news_score': sum(r[1] for r in rows) / total if total > 0 else 0
+        }
+    except:
+        return None
 
 
 class SentimentAnalyzer:
@@ -15,13 +72,13 @@ class SentimentAnalyzer:
         self.model = None
 
     def extract_features(self, data):
-        """استخراج ميزات المشاعر مع Feature Engineering"""
-        positive      = data.get('positive_ratio', 0.33)
-        negative      = data.get('negative_ratio', 0.33)
-        neutral       = data.get('neutral_ratio', 0.34)
-        news_sentiment = data.get('news_sentiment', 0)
-        fear_greed    = data.get('fear_greed_index', 50)
-        social_volume = data.get('social_volume', 0)
+        """Extract sentiment features"""
+        positive = data.get('positive_ratio', 0.33)
+        negative = data.get('negative_ratio', 0.33)
+        neutral = data.get('neutral_ratio', 0.34)
+        news_sentiment = data.get('news_score', 0)
+        fear_greed = 50
+        social_volume = 1000
 
         # Feature Engineering
         pos_neg_ratio   = positive / (negative + 0.001)
@@ -55,34 +112,108 @@ class SentimentAnalyzer:
         ]
 
     def train(self, trades, voting_scores=None):
-        """تدريب نموذج المشاعر"""
-        print("\n🎭 Training Sentiment Analysis Model...")
+        """Train sentiment model - reads from news_sentiment table directly"""
+        print("\nTraining Sentiment Model (from news_sentiment table)...")
 
-        features_list, labels_list = [], []
-        skipped_no_data = 0
-        
-        for trade in trades:
-            try:
-                data = trade.get('data', {})
-                if isinstance(data, str):
-                    data = json.loads(data)
-                sentiment_data = data.get('sentiment', {})
+        if not LIGHTGBM_AVAILABLE:
+            print("⚠️ LightGBM not available")
+            return None
+
+        # Read sentiment data from news_sentiment table
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            print("⚠️ No DATABASE_URL - cannot read from news_sentiment")
+            return None
+
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(database_url)
+            conn = psycopg2.connect(
+                host=parsed.hostname,
+                port=parsed.port,
+                database=parsed.path[1:],
+                user=parsed.username,
+                password=unquote(parsed.password)
+            )
+            cursor = conn.cursor()
+            
+            # Get sentiment data with symbol for matching
+            cursor.execute("""
+                SELECT symbol, sentiment, score, timestamp
+                FROM news_sentiment
+                WHERE timestamp > NOW() - INTERVAL '7 days'
+                ORDER BY timestamp DESC
+            """)
+            sentiment_rows = cursor.fetchall()
+            
+            # Get trades for matching (no time limit)
+            cursor.execute("""
+                SELECT symbol, profit_percent
+                FROM trades_history
+                WHERE action = 'SELL'
+            """)
+            trades_data = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            if not sentiment_rows:
+                print("⚠️ No sentiment data in news_sentiment table")
+                return None
+            
+            # Normalize symbol function (BTC/USDT -> BTCUSDT)
+            def normalize_symbol(s):
+                return s.replace('/', '') if '/' in s else s
+            
+            # Build sentiment features by symbol (normalized)
+            symbol_sentiment = {}
+            for row in sentiment_rows:
+                symbol = normalize_symbol(row[0])
+                sentiment = row[1]
+                score = row[2]
                 
-                # تخطي الصفقات بدون بيانات مشاعر حقيقية
-                if not sentiment_data or sentiment_data.get('fear_greed_index', 50) == 50 and sentiment_data.get('positive_ratio', 0.33) == 0.33:
-                    skipped_no_data += 1
+                if symbol not in symbol_sentiment:
+                    symbol_sentiment[symbol] = {'positive': 0, 'negative': 0, 'neutral': 0, 'total': 0, 'score_sum': 0}
+                
+                symbol_sentiment[symbol]['total'] += 1
+                symbol_sentiment[symbol]['score_sum'] += score
+                if sentiment == 'POSITIVE':
+                    symbol_sentiment[symbol]['positive'] += 1
+                elif sentiment == 'NEGATIVE':
+                    symbol_sentiment[symbol]['negative'] += 1
+                else:
+                    symbol_sentiment[symbol]['neutral'] += 1
+            
+            # Build training data
+            features_list, labels_list = [], []
+            for trade in trades_data:
+                symbol = normalize_symbol(trade[0])  # Normalize trade symbol too
+                profit = trade[1]
+                
+                if symbol not in symbol_sentiment:
                     continue
                 
+                sent = symbol_sentiment[symbol]
+                total = sent['total']
+                
+                sentiment_data = {
+                    'positive_ratio': sent['positive'] / total if total > 0 else 0.33,
+                    'negative_ratio': sent['negative'] / total if total > 0 else 0.33,
+                    'neutral_ratio': sent['neutral'] / total if total > 0 else 0.34,
+                    'news_score': sent['score_sum'] / total if total > 0 else 0
+                }
+                
                 features_list.append(self.extract_features(sentiment_data))
-                profit = float(trade.get('profit_percent', 0))
                 labels_list.append(1 if profit > 0.8 else 0)
-            except:
-                continue
-        
-        print(f"  📊 Training samples: {len(features_list)} trades (skipped {skipped_no_data} without sentiment data)")
+            
+            print(f"  Training samples: {len(features_list)} (from news_sentiment table)")
+            
+            if len(features_list) < 50:
+                print("⚠️ Not enough data for Sentiment Model")
+                return None
 
-        if len(features_list) < 50:
-            print("⚠️ Not enough data for Sentiment Model")
+        except Exception as e:
+            print(f"⚠️ Error reading from news_sentiment: {e}")
             return None
 
         X = pd.DataFrame(features_list, columns=self.feature_names)
