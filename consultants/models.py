@@ -91,10 +91,52 @@ def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None
         return None
 
     for trade in [dict(t) for t in trades_batch]:
-            except Exception as e_inner:
-                if len(meta_features) == 0 and len(final_labels) == 0:
-                    print(f"  First error: {e_inner}")
-                continue
+        try:
+            raw_data = trade.get('data', {})
+            if isinstance(raw_data, str):
+                data = json.loads(raw_data)
+            elif isinstance(raw_data, dict):
+                data = raw_data
+            else:
+                data = {}
+            if 'data' in data and isinstance(data.get('data'), dict):
+                data = data['data']
+            symbol = str(trade.get('symbol', ''))
+            
+            base = calculate_enhanced_features(data, trade)
+            rsi = data.get('rsi', 50)
+            is_oversold = 1 if rsi < 30 else 0
+            tq = trade.get('trade_quality', 'OK')
+            is_great = 1 if tq == 'GREAT' else 0
+            is_trap = 1 if tq in ['TRAP', 'RISKY'] else 0
+            hours_held = float(trade.get('hours_held', 24))
+            profit = float(trade.get('profit_percent', 0))
+            is_profit = 1 if profit > 0 else 0
+            
+            news = data.get('news', {})
+            news_score = news.get('news_score', 0)
+            news_pos = news.get('positive', 0)
+            news_neg = news.get('negative', 0)
+            news_total = news.get('total', 0)
+            news_ratio = news_pos / (news_neg + 0.001)
+            has_news = 1 if news_total > 0 else 0
+            
+            sent = data.get('sentiment', {})
+            sent_score = sent.get('news_sentiment', 0)
+            
+            liq = data.get('liquidity', {})
+            liq_score = liq.get('liquidity_score', 50)
+            depth_ratio = liq.get('depth_ratio', 1.0)
+            price_impact = liq.get('price_impact', 0.5)
+            good_liq = 1 if liq_score > 70 else 0
+            
+            features = base + [is_great, is_trap, hours_held, is_profit,
+                               news_score, news_pos, news_neg, news_total, news_ratio, has_news, sent_score,
+                               liq_score, depth_ratio, price_impact, good_liq]
+            meta_features.append(features)
+            final_labels.append(1 if profit > 0.5 else 0)
+        except:
+            continue
 
     if len(meta_features) < 100:
         print(f"⚠️ Not enough data ({len(meta_features)} samples)")
