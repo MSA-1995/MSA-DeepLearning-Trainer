@@ -17,7 +17,7 @@ from database import get_db_connection, close_db_connection
 
 class DatabaseManager:
     def __init__(self):
-        self.min_trades_for_training = 100
+        self.min_trades_for_training = 1
 
     # ========== Connection ==========
 
@@ -59,11 +59,7 @@ class DatabaseManager:
                 cursor.execute(query, tuple(params))
                 trades = cursor.fetchall()
 
-                if offset is None or offset == 0:
-                    if len(trades) < self.min_trades_for_training:
-                        print(f"⚠️ Not enough trades. Need {self.min_trades_for_training}, have {len(trades)}")
-                        return None
-                    print(f"📊 Loaded {len(trades)} trades for training")
+                print(f"📊 Loaded {len(trades)} trades for training")
             
             return trades
         except Exception as e:
@@ -349,35 +345,47 @@ class DatabaseManager:
             close_db_connection(conn)
 
     def get_new_trades_count(self):
-        """Returns (count, since_timestamp). If first training, returns (999999, None)."""
+        """Returns (count, since_timestamp). Each model trains independently on new trades."""
         conn = self._get_conn()
         if not conn:
             return 0, None
         try:
             with conn.cursor() as cursor:
-                # Get all model training times
+                # Get ALL models and their training times
                 cursor.execute("""
                     SELECT model_name, trained_at 
-                    FROM dl_models_v2 
-                    ORDER BY trained_at ASC
+                    FROM dl_models_v2
                 """)
                 rows = cursor.fetchall()
-
-                if not rows:
-                    # No models found → first training, load ALL trades
-                    print("ℹ️ No models found → will train on ALL trades (first training)")
+                
+                # Create dict of model_name -> trained_at
+                model_times = {row[0]: row[1] for row in rows}
+                
+                # Define required models
+                required_models = [
+                    'smart_money', 'risk', 'anomaly', 'exit', 'pattern',
+                    'liquidity', 'chart_cnn', 'sentiment', 'crypto_news',
+                    'volume_pred', 'meta_learner'
+                ]
+                
+                # Find missing models
+                missing_models = [m for m in required_models if m not in model_times]
+                
+                if not model_times:
+                    # No models at all → first training
+                    print("ℹ️ No models found → will train on ALL trades")
                     return 999999, None
-
-                # Oldest training timestamp among all models
-                oldest_training = rows[0][1]
-                missing_models = 11 - len(rows)  # 11 models required
-
-                if missing_models > 0:
-                    # Missing models → retrain on ALL trades
-                    print(f"ℹ️ {missing_models} models missing → will train on ALL trades")
-                    return 999999, None
-
-                # All models exist → count new trades since oldest training
+                
+                if missing_models:
+                    # Only missing models get ALL trades, not all models
+                    print(f"ℹ️ Missing models: {missing_models} → these will train on ALL trades")
+                    # Return special flag for per-model training
+                    return -1, missing_models  # -1 means "check per model"
+                
+                # All models exist → check for new trades AND new news
+                oldest_training = min(model_times.values())
+                
+                # Count new trades
                 cursor.execute("""
                     SELECT COUNT(*)
                     FROM trades_history
@@ -385,12 +393,39 @@ class DatabaseManager:
                       AND timestamp > %s
                 """, (oldest_training,))
                 new_trades = cursor.fetchone()[0]
+                
+                # Count new news (for sentiment and crypto_news models)
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM news_sentiment
+                    WHERE timestamp > %s
+                """, (oldest_training,))
+                new_news = cursor.fetchone()[0]
 
-                print(f"📊 {new_trades} new trades since {oldest_training}")
-                return new_trades, oldest_training
+                total_new = new_trades + new_news
+                print(f"📊 {new_trades} new trades + {new_news} new news = {total_new} total")
+                
+                # Return special marker if only news (no trades) - for sentiment/crypto_news
+                if new_trades == 0 and new_news > 0:
+                    return total_new, "NEWS_ONLY"  # Signal: only news, no trades
+                
+                return total_new, oldest_training
 
         except Exception as e:
             print(f"⚠️ Error counting new trades: {e}")
             return 0, None
         finally:
             close_db_connection(conn)
+    
+    def get_existing_model_timestamp(self):
+        """Get oldest training timestamp among existing models."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT MIN(trained_at) FROM dl_models_v2")
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except:
+            return None
