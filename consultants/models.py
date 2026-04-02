@@ -9,7 +9,7 @@ import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from features import calculate_enhanced_features
+from features import calculate_enhanced_features, get_feature_names
 
 
 # ========== Helper ==========
@@ -41,43 +41,8 @@ def _train_lgb(X, y, feature_names, n_estimators=300, max_depth=7, learning_rate
     return model, accuracy_score(y_test, model.predict(X_test))
 
 
-def _fe_base(data):
-    """Feature Engineering الأساسي المشترك بين كل النماذج"""
-    rsi          = data.get('rsi', 50)
-    macd         = data.get('macd', 0)
-    volume_ratio = data.get('volume_ratio', 1)
-    momentum     = data.get('price_momentum', 0)
-    atr          = data.get('atr', 1)
-    price_1h     = data.get('price_change_1h', 0)
-
-    # Feature Engineering
-    rsi_norm        = (rsi - 50) / 50
-    is_oversold     = 1 if rsi < 30 else 0
-    is_overbought   = 1 if rsi > 70 else 0
-    volume_spike    = 1 if volume_ratio > 2.5 else 0
-    volume_low      = 1 if volume_ratio < 0.5 else 0
-    macd_positive   = 1 if macd > 0 else 0
-    strong_momentum = 1 if abs(momentum) > 3 else 0
-    bullish_signal  = 1 if (rsi < 40 and macd > 0 and volume_ratio > 1.2) else 0
-    bearish_signal  = 1 if (rsi > 60 and macd < 0 and volume_ratio > 1.2) else 0
-    volatility      = atr / max(data.get('close', 1), 0.0001)
-
-    return [
-        rsi, macd, volume_ratio, momentum, atr,
-        data.get('ema_crossover', 0), data.get('bid_ask_spread', 0),
-        data.get('volume_trend', 0), price_1h,
-        # Feature Engineering
-        rsi_norm, is_oversold, is_overbought, volume_spike, volume_low,
-        macd_positive, strong_momentum, bullish_signal, bearish_signal, volatility
-    ]
-
-
-BASE_NAMES = [
-    'rsi', 'macd', 'volume_ratio', 'price_momentum', 'atr',
-    'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h',
-    'rsi_norm', 'is_oversold', 'is_overbought', 'volume_spike', 'volume_low',
-    'macd_positive', 'strong_momentum', 'bullish_signal', 'bearish_signal', 'volatility'
-]
+# Base feature names (38 features from calculate_enhanced_features)
+BASE_NAMES = get_feature_names()
 
 
 # ========== Meta-Learner ==========
@@ -133,8 +98,10 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
                     data = data['data']
                 symbol = str(trade.get('symbol', ''))
 
-                # البيانات التقنية مع Feature Engineering
-                base = _fe_base(data)
+                # البيانات التقنية مع Feature Engineering المحسن
+                base = calculate_enhanced_features(data, trade)
+                
+                # رسي وقيم إضافية من الداتا
                 rsi  = data.get('rsi', 50)
                 is_oversold = 1 if rsi < 30 else 0
                 good_liq    = 0  # سيُحسب لاحقاً
@@ -222,7 +189,7 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
                     opinions
                 )
                 meta_features.append(features)
-                final_labels.append(1 if profit > 0.8 else 0)
+                final_labels.append(1 if profit > 0.5 else 0)
             except Exception as e_inner:
                 if len(meta_features) == 0 and len(final_labels) == 0:
                     print(f"  First error: {e_inner}")
@@ -258,12 +225,12 @@ def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
 # ========== Models ==========
 
 def train_smart_money_model(trades, voting_scores=None):
-    """🐋 Smart Money - يكتشف دخول الأموال الذكية"""
+    """🐋 Smart Money - ي discovers smart money inflows"""
     print("\n🐋 Training Smart Money Model (LightGBM)...")
     scores = (voting_scores or {}).get('smart_money', {})
 
     def features(data, trade):
-        base = _fe_base(data)
+        base = calculate_enhanced_features(data, trade)
         # Feature Engineering خاص بالأموال الذكية
         vol   = data.get('volume_ratio', 1)
         macd  = data.get('macd', 0)
@@ -292,12 +259,12 @@ def train_smart_money_model(trades, voting_scores=None):
 
 
 def train_risk_model(trades, voting_scores=None):
-    """🛡️ Risk Manager - يكتشف الفخاخ والمخاطر"""
+    """🛡️ Risk Manager - discovers traps and risks"""
     print("\n🛡️ Training Risk Model (LightGBM)...")
     scores = (voting_scores or {}).get('risk', {})
 
     def features(data, trade):
-        base = _fe_base(data)
+        base = calculate_enhanced_features(data, trade)
         rsi  = data.get('rsi', 50)
         vol  = data.get('volume_ratio', 1)
         conf = data.get('confidence', 60)
@@ -326,16 +293,16 @@ def train_risk_model(trades, voting_scores=None):
 
 
 def train_anomaly_model(trades, voting_scores=None):
-    """🚨 Anomaly Detector - يكتشف الحالات الشاذة"""
+    """🚨 Anomaly Detector - discovers anomalies"""
     print("\n🚨 Training Anomaly Model (LightGBM)...")
     scores = (voting_scores or {}).get('anomaly', {})
 
     def features(data, trade):
-        base = _fe_base(data)
+        base = calculate_enhanced_features(data, trade)
         rsi  = data.get('rsi', 50)
         vol  = data.get('volume_ratio', 1)
         mom  = data.get('price_momentum', 0)
-        # Feature Engineering للشذوذ (بدون تكرار مع _fe_base)
+        # Feature Engineering للشذوذ
         flash_crash  = 1 if (vol > 4.0 and mom < -5) else 0
         whale_dump   = 1 if (vol > 5.0 and rsi > 70) else 0
         return base + [
@@ -358,12 +325,12 @@ def train_anomaly_model(trades, voting_scores=None):
 
 
 def train_exit_model(trades, voting_scores=None):
-    """🎯 Exit Strategy - يتعلم متى البيع المثالي"""
+    """🎯 Exit Strategy - learns optimal exit timing"""
     print("\n🎯 Training Exit Model (LightGBM)...")
     scores = (voting_scores or {}).get('exit', {})
 
     def features(data, trade):
-        base = _fe_base(data)
+        base = calculate_enhanced_features(data, trade)
         rsi  = data.get('rsi', 50)
         macd = data.get('macd', 0)
         conf = data.get('confidence', 60)
@@ -391,12 +358,12 @@ def train_exit_model(trades, voting_scores=None):
 
 
 def train_pattern_model(trades, voting_scores=None):
-    """🧠 Pattern Recognition - يتعلم الأنماط الناجحة"""
+    """🧠 Pattern Recognition - learns successful patterns"""
     print("\n🧠 Training Pattern Model (LightGBM)...")
     scores = (voting_scores or {}).get('pattern', {})
 
     def features(data, trade):
-        base = _fe_base(data)
+        base = calculate_enhanced_features(data, trade)
         rsi  = data.get('rsi', 50)
         macd = data.get('macd', 0)
         vol  = data.get('volume_ratio', 1)
@@ -425,7 +392,7 @@ def train_pattern_model(trades, voting_scores=None):
 
 
 def train_liquidity_model(trades, voting_scores=None):
-    """💧 Liquidity Analyzer - يتعلم السيولة الجيدة"""
+    """💧 Liquidity Analyzer - learns good liquidity patterns"""
     print("\n💧 Training Liquidity Model (LightGBM)...")
     scores = (voting_scores or {}).get('liquidity', {})
 
@@ -502,7 +469,7 @@ def train_liquidity_model(trades, voting_scores=None):
 
 
 def train_chart_cnn_model(trades, voting_scores=None):
-    """📊 Chart Pattern Analyzer - يتعلم أنماط الشارت"""
+    """📊 Chart Pattern Analyzer - learns chart patterns"""
     print("\n📊 Training Chart Pattern Model (LightGBM)...")
     scores = (voting_scores or {}).get('cnn', {})
 
@@ -521,20 +488,7 @@ def train_chart_cnn_model(trades, voting_scores=None):
         ])
         return base
 
-    base_names = [
-        'rsi', 'macd', 'volume_ratio', 'price_momentum',
-        'bb_position', 'atr_estimate', 'stochastic', 'ema_signal',
-        'volume_strength', 'momentum_strength',
-        'atr', 'ema_crossover', 'bid_ask_spread', 'volume_trend', 'price_change_1h',
-        'trade_quality_score', 'advisor_vote_consensus', 'is_trap_trade',
-        'profit_magnitude', 'hours_held_normalized', 'is_profitable',
-        'btc_trend_normalized', 'is_bullish_market', 'hour_normalized',
-        'is_asian_session', 'is_european_session', 'is_us_session', 'optimal_hold_score',
-        'fib_score', 'fib_level_encoded',
-        'regime_score', 'regime_adx', 'volatility_ratio', 'position_multiplier',
-        'flash_risk_score', 'flash_crash_detected', 'whale_dump_detected', 'cascade_risk_score'
-    ]
-    names = base_names + ['bullish_chart', 'bearish_chart', 'neutral_chart', 'tp_accuracy', 'sell_accuracy']
+    names = BASE_NAMES + ['bullish_chart', 'bearish_chart', 'neutral_chart', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
         return 1 if t.get('trade_quality') in ['GREAT', 'GOOD'] else 0
