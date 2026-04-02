@@ -111,8 +111,8 @@ class SentimentAnalyzer:
             'is_fearful', 'is_greedy', 'high_social', 'strong_positive', 'strong_negative'
         ]
 
-    def train(self, trades, voting_scores=None):
-        """Train sentiment model - reads from news_sentiment table directly"""
+    def train(self, trades, voting_scores=None, since_timestamp=None):
+        """Train sentiment model - reads from news_sentiment table, only NEW data since last training"""
         print("\nTraining Sentiment Model (from news_sentiment table)...")
 
         if not LIGHTGBM_AVAILABLE:
@@ -137,21 +137,37 @@ class SentimentAnalyzer:
             )
             cursor = conn.cursor()
             
-            # Get sentiment data with symbol for matching
-            cursor.execute("""
-                SELECT symbol, sentiment, score, timestamp
-                FROM news_sentiment
-                WHERE timestamp > NOW() - INTERVAL '7 days'
-                ORDER BY timestamp DESC
-            """)
+            # Get ONLY NEW sentiment data since last training (like other advisors)
+            if since_timestamp:
+                cursor.execute("""
+                    SELECT symbol, sentiment, score, timestamp
+                    FROM news_sentiment
+                    WHERE timestamp > %s
+                    ORDER BY timestamp DESC
+                """, (since_timestamp,))
+            else:
+                # First training - get all
+                cursor.execute("""
+                    SELECT symbol, sentiment, score, timestamp
+                    FROM news_sentiment
+                    ORDER BY timestamp DESC
+                """)
             sentiment_rows = cursor.fetchall()
             
-            # Get trades for matching (no time limit)
-            cursor.execute("""
-                SELECT symbol, profit_percent
-                FROM trades_history
-                WHERE action = 'SELL'
-            """)
+            # Get ONLY NEW trades since last training
+            if since_timestamp:
+                cursor.execute("""
+                    SELECT symbol, profit_percent
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND timestamp > %s
+                """, (since_timestamp,))
+            else:
+                cursor.execute("""
+                    SELECT symbol, profit_percent
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                """)
             trades_data = cursor.fetchall()
             
             cursor.close()
