@@ -361,14 +361,14 @@ class DatabaseManager:
                 # Create dict of model_name -> trained_at
                 model_times = {row[0]: row[1] for row in rows}
                 
-                # Define required models (meta_learner excluded - it trains independently)
+                # Define required models
                 required_models = [
                     'smart_money', 'risk', 'anomaly', 'exit', 'pattern',
                     'liquidity', 'chart_cnn', 'sentiment', 'crypto_news',
-                    'volume_pred'
+                    'volume_pred', 'meta_learner'
                 ]
                 
-                # Find missing models
+                # Find missing models - all models including meta_learner
                 missing_models = [m for m in required_models if m not in model_times]
                 
                 if not model_times:
