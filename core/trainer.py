@@ -165,7 +165,9 @@ class DeepLearningTrainerLightGBM:
                     continue
                 
                 try:
-                    result = train_fn(trades_new, voting_scores)
+                    # Pass since_timestamp to train only new data
+                    ts_for_news = None if model_name in missing_models else since_timestamp
+                    result = train_fn(trades_new, voting_scores, since_timestamp=ts_for_news)
                     if result:
                         model, accuracy = result
                         self.models[model_name] = model
