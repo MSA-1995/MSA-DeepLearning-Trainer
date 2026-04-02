@@ -1,13 +1,73 @@
 """
-📰 Crypto News Analysis Model - تحليل أخبار العملات الرقمية
+Crypto News Analysis Model - reads directly from news_sentiment table
 """
 
+import os
 import json
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
+import psycopg2
+from urllib.parse import unquote
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except:
+    LIGHTGBM_AVAILABLE = False
+
+
+def get_news_from_db(symbol, hours=24):
+    """Read news data directly from news_sentiment table"""
+    try:
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            return None
+        
+        from urllib.parse import urlparse
+        parsed = urlparse(database_url)
+        conn = psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port,
+            database=parsed.path[1:],
+            user=parsed.username,
+            password=unquote(parsed.password)
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT sentiment, score, headline
+            FROM news_sentiment 
+            WHERE symbol = %s 
+            AND timestamp > NOW() - INTERVAL '%s hours'
+        """, (symbol, hours))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        if not rows:
+            return None
+        
+        positive = sum(1 for r in rows if r[0] == 'POSITIVE')
+        negative = sum(1 for r in rows if r[0] == 'NEGATIVE')
+        neutral = sum(1 for r in rows if r[0] == 'NEUTRAL')
+        total = len(rows)
+        avg_score = sum(r[1] for r in rows) / total if total > 0 else 0
+        
+        return {
+            'news_count_24h': total,
+            'positive_news_count': positive,
+            'negative_news_count': negative,
+            'neutral_news_count': neutral,
+            'news_sentiment_avg': avg_score,
+            'news_score': avg_score,
+            'total': total,
+            'positive': positive,
+            'negative': negative,
+            'neutral': neutral
+        }
+    except:
+        return None
 
 
 class CryptoNewsAnalyzer:
@@ -15,80 +75,143 @@ class CryptoNewsAnalyzer:
         self.model = None
 
     def extract_features(self, data):
-        """استخراج ميزات الأخبار مع Feature Engineering"""
-        news_count    = data.get('news_count_24h', 0)
-        positive      = data.get('positive_news_count', 0)
-        negative      = data.get('negative_news_count', 0)
-        neutral       = data.get('neutral_news_count', 0)
-        sentiment_avg = data.get('news_sentiment_avg', 0)
-        breaking      = data.get('breaking_news_count', 0)
-        partnership   = data.get('partnership_news', 0)
-        regulation    = data.get('regulation_news', 0)
+        """Extract news features"""
+        news_count = data.get('news_count_24h', data.get('total', 0))
+        positive = data.get('positive_news_count', data.get('positive', 0))
+        negative = data.get('negative_news_count', data.get('negative', 0))
+        neutral = data.get('neutral_news_count', data.get('neutral', 0))
+        sentiment_avg = data.get('news_sentiment_avg', data.get('news_score', 0))
 
         # Feature Engineering
-        pos_neg_ratio    = positive / (negative + 0.001)
-        news_sentiment   = (positive - negative) / (news_count + 0.001)
-        breaking_ratio   = breaking / (news_count + 0.001)
-        regulation_risk  = 1 if regulation > 0 else 0
-        partnership_boost = 1 if partnership > 0 else 0
-        high_news_volume = 1 if news_count > 10 else 0
-        strong_positive  = 1 if positive > negative * 2 else 0
-        strong_negative  = 1 if negative > positive * 2 else 0
+        pos_neg_ratio = positive / (negative + 0.001)
+        news_sentiment = (positive - negative) / (news_count + 0.001)
+        high_news_volume = 1 if news_count > 5 else 0
+        strong_positive = 1 if positive > negative * 2 else 0
+        strong_negative = 1 if negative > positive * 2 else 0
 
         return [
             news_count, positive, negative, neutral, sentiment_avg,
-            data.get('news_volume_score', 0), breaking, partnership, regulation,
-            data.get('technical_news', 0), data.get('market_news', 0),
-            data.get('exchange_news', 0), data.get('news_recency_score', 0),
-            data.get('news_source_reliability', 0.5),
-            # Feature Engineering
-            pos_neg_ratio, news_sentiment, breaking_ratio,
-            regulation_risk, partnership_boost, high_news_volume,
-            strong_positive, strong_negative
+            pos_neg_ratio, news_sentiment,
+            high_news_volume, strong_positive, strong_negative
         ]
 
     @property
     def feature_names(self):
         return [
             'news_count_24h', 'positive_news_count', 'negative_news_count',
-            'neutral_news_count', 'news_sentiment_avg', 'news_volume_score',
-            'breaking_news_count', 'partnership_news', 'regulation_news',
-            'technical_news', 'market_news', 'exchange_news',
-            'news_recency_score', 'news_source_reliability',
-            'pos_neg_ratio', 'news_sentiment', 'breaking_ratio',
-            'regulation_risk', 'partnership_boost', 'high_news_volume',
-            'strong_positive', 'strong_negative'
+            'neutral_news_count', 'news_sentiment_avg',
+            'pos_neg_ratio', 'news_sentiment',
+            'high_news_volume', 'strong_positive', 'strong_negative'
         ]
 
     def train(self, trades, voting_scores=None):
-        """تدريب نموذج الأخبار"""
-        print("\n📰 Training Crypto News Model...")
+        """Train crypto news model - reads from news_sentiment table directly"""
+        print("\nTraining Crypto News Model (from news_sentiment table)...")
 
-        features_list, labels_list = [], []
-        skipped_no_data = 0
-        
-        for trade in trades:
-            try:
-                data = trade.get('data', {})
-                if isinstance(data, str):
-                    data = json.loads(data)
-                news_data = data.get('news', {})
+        if not LIGHTGBM_AVAILABLE:
+            print("⚠️ LightGBM not available")
+            return None
+
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            print("⚠️ No DATABASE_URL - cannot read from news_sentiment")
+            return None
+
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(database_url)
+            conn = psycopg2.connect(
+                host=parsed.hostname,
+                port=parsed.port,
+                database=parsed.path[1:],
+                user=parsed.username,
+                password=unquote(parsed.password)
+            )
+            cursor = conn.cursor()
+            
+            # Get news data by symbol
+            cursor.execute("""
+                SELECT symbol, sentiment, score, headline
+                FROM news_sentiment
+                WHERE timestamp > NOW() - INTERVAL '7 days'
+                ORDER BY timestamp DESC
+            """)
+            news_rows = cursor.fetchall()
+            
+            # Get trades for matching (no time limit)
+            cursor.execute("""
+                SELECT symbol, profit_percent
+                FROM trades_history
+                WHERE action = 'SELL'
+            """)
+            trades_data = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            if not news_rows:
+                print("⚠️ No news data in news_sentiment table")
+                return None
+            
+            # Normalize symbol function (BTC/USDT -> BTCUSDT)
+            def normalize_symbol(s):
+                return s.replace('/', '') if '/' in s else s
+            
+            # Build news features by symbol (normalized)
+            symbol_news = {}
+            for row in news_rows:
+                symbol = normalize_symbol(row[0])
+                sentiment = row[1]
+                score = row[2]
                 
-                # تخطي الصفقات بدون بيانات أخبار حقيقية
-                if not news_data or news_data.get('news_count_24h', 0) == 0:
-                    skipped_no_data += 1
+                if symbol not in symbol_news:
+                    symbol_news[symbol] = {'positive': 0, 'negative': 0, 'neutral': 0, 'total': 0, 'score_sum': 0}
+                
+                symbol_news[symbol]['total'] += 1
+                symbol_news[symbol]['score_sum'] += score
+                if sentiment == 'POSITIVE':
+                    symbol_news[symbol]['positive'] += 1
+                elif sentiment == 'NEGATIVE':
+                    symbol_news[symbol]['negative'] += 1
+                else:
+                    symbol_news[symbol]['neutral'] += 1
+            
+            # Build training data
+            features_list, labels_list = [], []
+            for trade in trades_data:
+                symbol = normalize_symbol(trade[0])  # Normalize trade symbol too
+                profit = trade[1]
+                
+                if symbol not in symbol_news:
                     continue
                 
+                news = symbol_news[symbol]
+                total = news['total']
+                
+                news_data = {
+                    'news_count_24h': total,
+                    'positive_news_count': news['positive'],
+                    'negative_news_count': news['negative'],
+                    'neutral_news_count': news['neutral'],
+                    'news_sentiment_avg': news['score_sum'] / total if total > 0 else 0,
+                    'news_score': news['score_sum'] / total if total > 0 else 0,
+                    'total': total,
+                    'positive': news['positive'],
+                    'negative': news['negative'],
+                    'neutral': news['neutral']
+                }
+                
                 features_list.append(self.extract_features(news_data))
-                profit = float(trade.get('profit_percent', 0))
                 labels_list.append(1 if profit > 0.8 else 0)
-            except:
-                continue
-        
-        print(f"  📊 Training samples: {len(features_list)} trades (skipped {skipped_no_data} without news data)")
+            
+            print(f"  Training samples: {len(features_list)} (from news_sentiment table)")
+            
+            if len(features_list) < 50:
+                print("⚠️ Not enough data for Crypto News Model")
+                return None
 
-        if len(features_list) < 50:
-            print("⚠️ Not enough data for Crypto News Model")
+        except Exception as e:
+            print(f"⚠️ Error reading from news_sentiment: {e}")
             return None
 
         X = pd.DataFrame(features_list, columns=self.feature_names)
@@ -102,7 +225,7 @@ class CryptoNewsAnalyzer:
         )
         self.model.fit(X_train, y_train)
         accuracy = accuracy_score(y_test, self.model.predict(X_test))
-        print(f"📰 Crypto News Model: Accuracy {accuracy*100:.2f}%")
+        print(f"Crypto News Model: Accuracy {accuracy*100:.2f}%")
         return self.model, accuracy
 
     def predict(self, news_data):
@@ -111,24 +234,6 @@ class CryptoNewsAnalyzer:
         X = pd.DataFrame([self.extract_features(news_data)], columns=self.feature_names)
         proba = self.model.predict_proba(X)[0]
         return proba[1] if len(proba) > 1 else 0.5
-
-    def get_news_impact_score(self, news_data):
-        if not news_data:
-            return 0
-        score = 0
-        news_count = news_data.get('news_count_24h', 0)
-        if news_count > 10:
-            score += 20
-        elif news_count > 5:
-            score += 10
-        positive = news_data.get('positive_news_count', 0)
-        negative = news_data.get('negative_news_count', 0)
-        score += (positive - negative) * 10
-        score += news_data.get('breaking_news_count', 0) * 15
-        score += news_data.get('partnership_news', 0) * 20
-        score -= news_data.get('regulation_news', 0) * 25
-        score += news_data.get('news_sentiment_avg', 0) * 30
-        return max(-100, min(100, score))
 
 
 def train_crypto_news_model(trades, voting_scores=None):
