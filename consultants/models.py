@@ -47,13 +47,9 @@ BASE_NAMES = get_feature_names()
 
 # ========== Meta-Learner ==========
 
-def train_meta_learner_model(db_manager, trained_models, voting_scores=None):
-    """👑🧠 The New King - يتعلم بشكل مستقل من كل البيانات"""
-    print("\n👑🧠 Training Meta-Learner Model (The New King)...")
-
-    if not trained_models or len(trained_models) < 7:
-        print("⚠️ Not enough trained consultant models.")
-        return None
+def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None):
+    """Meta-Learner - يتعلم بشكل مستقل مثل أي مستشار ثاني"""
+    print("\n👑🧠 Training Meta-Learner Model...")
 
     print("Loading auxiliary data...")
     try:
