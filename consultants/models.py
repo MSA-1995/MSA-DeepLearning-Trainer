@@ -392,79 +392,72 @@ def train_pattern_model(trades, voting_scores=None):
 
 
 def train_liquidity_model(trades, voting_scores=None):
-    """💧 Liquidity Analyzer - learns good liquidity patterns"""
+    """💧 Liquidity Analyzer - learns good liquidity patterns from each trade"""
     print("\n💧 Training Liquidity Model (LightGBM)...")
     scores = (voting_scores or {}).get('liquidity', {})
 
-    coin_data = {}
+    features_list, labels_list = [], []
+    skipped_no_data = 0
+    
     for trade in trades:
         try:
-            symbol = trade.get('symbol')
-            profit = float(trade.get('profit_percent', 0))
-            data   = trade.get('data', {})
+            data = trade.get('data', {})
             if isinstance(data, str):
                 data = json.loads(data)
-            if symbol not in coin_data:
-                coin_data[symbol] = {'profits': [], 'count': 0, 'volume_ratios': [],
-                                     'bid_ask_spreads': [], 'volume_trends': [],
-                                     'depth_ratios': [], 'liquidity_scores': [],
-                                     'price_impacts': [], 'volume_consistencies': []}
-            cd = coin_data[symbol]
-            cd['profits'].append(profit)
-            cd['count'] += 1
-            cd['volume_ratios'].append(data.get('volume_ratio', 1.0))
-            cd['bid_ask_spreads'].append(data.get('bid_ask_spread', 0))
-            cd['volume_trends'].append(data.get('volume_trend', 0))
+            
             liq = data.get('liquidity', {})
-            cd['depth_ratios'].append(liq.get('depth_ratio', 1.0))
-            cd['liquidity_scores'].append(liq.get('liquidity_score', 50))
-            cd['price_impacts'].append(liq.get('price_impact', 0.5))
-            cd['volume_consistencies'].append(liq.get('volume_consistency', 50))
+            liquidity_score = liq.get('liquidity_score', 50)
+            
+            # تخطي الصفقات بدون بيانات سيولة حقيقية (الافتراضي 50 يعني ما فيه بيانات)
+            if liquidity_score == 50 and not liq:
+                skipped_no_data += 1
+                continue
+            
+            profit = float(trade.get('profit_percent', 0))
+            
+            # كل صفقة هي عنصر تدريب واحد
+            volume_ratio = data.get('volume_ratio', 1.0)
+            bid_ask_spread = data.get('bid_ask_spread', 0)
+            volume_trend = data.get('volume_trend', 0)
+            depth_ratio = liq.get('depth_ratio', 1.0)
+            price_impact = liq.get('price_impact', 0.5)
+            volume_consistency = liq.get('volume_consistency', 50)
+            
+            # Feature Engineering
+            good_liquidity = 1 if liquidity_score > 70 else 0
+            low_impact = 1 if price_impact < 0.3 else 0
+            consistent_vol = 1 if volume_consistency > 60 else 0
+            
+            features_list.append([
+                profit,
+                volume_ratio, bid_ask_spread, volume_trend,
+                depth_ratio, liquidity_score, price_impact, volume_consistency,
+                good_liquidity, low_impact, consistent_vol,
+                scores.get('tp_accuracy', 0.5), scores.get('sell_accuracy', 0.5)
+            ])
+            
+            # التصنيف: صفقة ناجحة = ربح > 0%
+            labels_list.append(1 if profit > 0 else 0)
+            
         except:
             continue
-
-    def _avg(lst): return sum(lst) / len(lst) if lst else 0
-
-    features_list, labels_list = [], []
-    for symbol, cd in coin_data.items():
-        if cd['count'] < 3:
-            continue
-        avg_profit  = _avg(cd['profits'])
-        win_rate    = sum(1 for p in cd['profits'] if p > 0) / len(cd['profits'])
-        spread_vol  = float(np.std(cd['bid_ask_spreads'])) if len(cd['bid_ask_spreads']) > 1 else 0
-        avg_liq     = _avg(cd['liquidity_scores'])
-        avg_impact  = _avg(cd['price_impacts'])
-
-        # Feature Engineering للسيولة
-        good_liquidity  = 1 if avg_liq > 70 else 0
-        low_impact      = 1 if avg_impact < 0.3 else 0
-        consistent_vol  = 1 if _avg(cd['volume_consistencies']) > 60 else 0
-        profit_per_trade = avg_profit / max(cd['count'], 1)
-
-        features_list.append([
-            avg_profit, win_rate, cd['count'],
-            max(cd['profits']), min(cd['profits']),
-            _avg(cd['volume_ratios']), _avg(cd['bid_ask_spreads']),
-            _avg(cd['volume_trends']), _avg(cd['depth_ratios']),
-            avg_liq, avg_impact, _avg(cd['volume_consistencies']), spread_vol,
-            good_liquidity, low_impact, consistent_vol, profit_per_trade,
-            scores.get('tp_accuracy', 0.5), scores.get('sell_accuracy', 0.5)
-        ])
-        labels_list.append(1 if (avg_profit > 0.5 and win_rate > 0.50) else 0)
-
+    
     names = [
-        'avg_profit', 'win_rate', 'trade_count', 'max_profit', 'min_profit',
-        'avg_volume_ratio', 'avg_bid_ask_spread', 'avg_volume_trend', 'avg_depth_ratio',
-        'avg_liquidity_score', 'avg_price_impact', 'avg_volume_consistency', 'spread_volatility',
-        'good_liquidity', 'low_impact', 'consistent_vol', 'profit_per_trade',
+        'profit',
+        'volume_ratio', 'bid_ask_spread', 'volume_trend',
+        'depth_ratio', 'liquidity_score', 'price_impact', 'volume_consistency',
+        'good_liquidity', 'low_impact', 'consistent_vol',
         'tp_accuracy', 'sell_accuracy'
     ]
-
-    if len(features_list) < 20:
-        print("⚠️ Not enough coins for Liquidity")
+    
+    print(f"  📊 Training samples: {len(features_list)} trades (skipped {skipped_no_data} without liquidity data)")
+    
+    if len(features_list) < 50:
+        print("⚠️ Not enough trades with liquidity data for training")
         return None
-    model, acc = _train_lgb(features_list, np.array(labels_list), names, n_estimators=200, max_depth=6, learning_rate=0.05)
-    print(f"💧 Liquidity Model: Accuracy {acc*100:.2f}% | Learns: GOOD liquidity coins")
+    
+    model, acc = _train_lgb(features_list, np.array(labels_list), names, n_estimators=300, max_depth=6, learning_rate=0.05)
+    print(f"💧 Liquidity Model: Accuracy {acc*100:.2f}% | Learns from {len(features_list)} trades")
     return model, acc
 
 
