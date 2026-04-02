@@ -47,8 +47,8 @@ BASE_NAMES = get_feature_names()
 
 # ========== Meta-Learner ==========
 
-def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None):
-    """Meta-Learner - يتعلم بشكل مستقل مثل أي مستشار ثاني"""
+def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None, since_timestamp=None):
+    """Meta-Learner - learns from NEW trades only (like other advisors)"""
     print("\n👑🧠 Training Meta-Learner Model...")
 
     print("Loading auxiliary data...")
@@ -74,8 +74,12 @@ def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None
 
     meta_features, final_labels = [], []
 
-    print(f"  -> Processing all {total_trades} trades for King...")
-    try:
+    # Load trades - NEW only if since_timestamp provided
+    if since_timestamp:
+        print(f"  -> Processing NEW trades since {since_timestamp}...")
+        trades_batch = db_manager.load_training_data(since_timestamp=since_timestamp)
+    else:
+        print(f"  -> Processing ALL {total_trades} trades (first training)...")
         trades_batch = db_manager.load_training_data(limit=total_trades)
         if not trades_batch:
             return None
