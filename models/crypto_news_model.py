@@ -104,8 +104,8 @@ class CryptoNewsAnalyzer:
             'high_news_volume', 'strong_positive', 'strong_negative'
         ]
 
-    def train(self, trades, voting_scores=None):
-        """Train crypto news model - reads from news_sentiment table directly"""
+    def train(self, trades, voting_scores=None, since_timestamp=None):
+        """Train crypto news model - reads from news_sentiment table, only NEW data since last training"""
         print("\nTraining Crypto News Model (from news_sentiment table)...")
 
         if not LIGHTGBM_AVAILABLE:
@@ -129,21 +129,37 @@ class CryptoNewsAnalyzer:
             )
             cursor = conn.cursor()
             
-            # Get news data by symbol
-            cursor.execute("""
-                SELECT symbol, sentiment, score, headline
-                FROM news_sentiment
-                WHERE timestamp > NOW() - INTERVAL '7 days'
-                ORDER BY timestamp DESC
-            """)
+            # Get ONLY NEW news data since last training (like other advisors)
+            if since_timestamp:
+                cursor.execute("""
+                    SELECT symbol, sentiment, score, headline
+                    FROM news_sentiment
+                    WHERE timestamp > %s
+                    ORDER BY timestamp DESC
+                """, (since_timestamp,))
+            else:
+                # First training - get all
+                cursor.execute("""
+                    SELECT symbol, sentiment, score, headline
+                    FROM news_sentiment
+                    ORDER BY timestamp DESC
+                """)
             news_rows = cursor.fetchall()
             
-            # Get trades for matching (no time limit)
-            cursor.execute("""
-                SELECT symbol, profit_percent
-                FROM trades_history
-                WHERE action = 'SELL'
-            """)
+            # Get ONLY NEW trades since last training
+            if since_timestamp:
+                cursor.execute("""
+                    SELECT symbol, profit_percent
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND timestamp > %s
+                """, (since_timestamp,))
+            else:
+                cursor.execute("""
+                    SELECT symbol, profit_percent
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                """)
             trades_data = cursor.fetchall()
             
             cursor.close()
