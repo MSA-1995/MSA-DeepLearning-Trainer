@@ -1,0 +1,431 @@
+"""
+🗄️ Database Manager
+Handles all PostgreSQL operations: connect, load, save.
+"""
+
+import json
+import pickle
+from datetime import datetime, timedelta
+import time
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+from alerts import send_critical_alert
+from database import get_db_connection, close_db_connection
+
+
+class DatabaseManager:
+    def __init__(self):
+        self.min_trades_for_training = 1
+
+    # ========== Connection ==========
+
+    def _get_conn(self):
+        """Return valid connection"""
+        return get_db_connection()
+
+    # ========== Load ==========
+
+    def load_training_data(self, since_timestamp=None, limit=None, offset=None):
+        """Load SELL trades for training. If since_timestamp is None, loads ALL trades (first training)."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                query = """
+                    SELECT symbol, profit_percent, action, timestamp, data
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND data IS NOT NULL
+                """
+                params = []
+                
+                # Only filter by timestamp if since_timestamp is provided
+                if since_timestamp is not None:
+                    query += " AND timestamp > %s"
+                    params.append(since_timestamp)
+                
+                query += " ORDER BY timestamp DESC"
+                
+                if limit is not None:
+                    query += " LIMIT %s"
+                    params.append(limit)
+                if offset is not None:
+                    query += " OFFSET %s"
+                    params.append(offset)
+
+                cursor.execute(query, tuple(params))
+                trades = cursor.fetchall()
+
+                print(f"📊 Loaded {len(trades)} trades for training")
+            
+            return trades
+        except Exception as e:
+            print(f"❌ Error loading data: {e}")
+            return None
+        finally:
+            close_db_connection(conn)
+
+    def get_total_trades_count(self):
+        """Get the total number of SELL trades available for training."""
+        conn = self._get_conn()
+        if not conn:
+            return 0
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND data IS NOT NULL
+                """)
+                count = cursor.fetchone()[0]
+            return count
+        except Exception as e:
+            print(f"❌ Error getting total trades count: {e}")
+            return 0
+        finally:
+            close_db_connection(conn)
+
+    def load_ai_decisions(self, limit=1000):
+        """Load historical decisions from ai_decisions table."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT symbol, decision, confidence, timestamp
+                    FROM ai_decisions
+                    WHERE decision IN ('BUY', 'SELL')
+                    ORDER BY id DESC
+                    LIMIT %s
+                """, (limit,))
+                decisions = cursor.fetchall()
+            print(f"🧠 Loaded {len(decisions)} historical AI decisions.")
+            return decisions
+        except Exception as e:
+            print(f"❌ Error loading AI decisions: {e}")
+            return []
+        finally:
+            close_db_connection(conn)
+
+    def load_traps(self, limit=500):
+        """Load data from the trap_memory table."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT symbol, data, timestamp
+                    FROM trap_memory
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (limit,))
+                traps = cursor.fetchall()
+            print(f"🪤 Loaded {len(traps)} records from trap memory.")
+            return traps
+        except Exception as e:
+            print(f"❌ Error loading trap memory: {e}")
+            return []
+        finally:
+            close_db_connection(conn)
+
+    def load_trades(self, limit=2000):
+        """Load all types of trades from trades_history table."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT symbol, profit_percent, action, timestamp, data
+                    FROM trades_history
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (limit,))
+                trades = cursor.fetchall()
+            print(f"📜 Loaded {len(trades)} records from trades history.")
+            return trades
+        except Exception as e:
+            print(f"❌ Error loading trades history: {e}")
+            return []
+        finally:
+            close_db_connection(conn)
+
+    def calculate_voting_accuracy(self, trades):
+        """حساب دقة تصويت المستشارين من جدول consultant_votes"""
+        print("\n🎯 Calculating voting accuracy from database...")
+        conn = self._get_conn()
+        if not conn:
+            return {}
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT consultant_name, vote_type, is_correct, COUNT(*) as total
+                    FROM consultant_votes
+                    WHERE timestamp > NOW() - INTERVAL '30 days'
+                    GROUP BY consultant_name, vote_type, is_correct
+                """)
+                rows = cursor.fetchall()
+
+            consultant_scores = {}
+            for row in rows:
+                name, vote_type, is_correct, count = row
+                if name not in consultant_scores:
+                    consultant_scores[name] = {
+                        'tp_correct': 0,     'tp_wrong': 0,
+                        'amount_correct': 0, 'amount_wrong': 0,
+                        'sl_correct': 0,     'sl_wrong': 0,
+                        'sell_correct': 0,   'sell_wrong': 0,
+                        'buy_correct': 0,    'buy_wrong': 0
+                    }
+                key = f"{vote_type}_{'correct' if is_correct else 'wrong'}"
+                consultant_scores[name][key] = count
+
+            final_scores = {}
+            for consultant, scores in consultant_scores.items():
+                tp_total     = scores['tp_correct']     + scores['tp_wrong']
+                amount_total = scores['amount_correct'] + scores['amount_wrong']
+                sl_total     = scores['sl_correct']     + scores['sl_wrong']
+                sell_total   = scores['sell_correct']   + scores['sell_wrong']
+                buy_total    = scores['buy_correct']    + scores['buy_wrong']
+
+                final_scores[consultant] = {
+                    'tp_accuracy':     scores['tp_correct']     / tp_total     if tp_total     > 0 else 0.5,
+                    'amount_accuracy': scores['amount_correct'] / amount_total if amount_total > 0 else 0.5,
+                    'sl_accuracy':     scores['sl_correct']     / sl_total     if sl_total     > 0 else 0.5,
+                    'sell_accuracy':   scores['sell_correct']   / sell_total   if sell_total   > 0 else 0.5,
+                    'buy_accuracy':    scores['buy_correct']    / buy_total    if buy_total    > 0 else 0.5,
+                    'overall_accuracy': (
+                        (scores['tp_correct'] + scores['amount_correct'] + scores['sl_correct'] +
+                         scores['sell_correct'] + scores['buy_correct']) /
+                        max(tp_total + amount_total + sl_total + sell_total + buy_total, 1)
+                    )
+                }
+
+            if final_scores:
+                print(f"✅ Loaded voting accuracy for {len(final_scores)} consultants:")
+                for name, s in final_scores.items():
+                    print(f"   • {name}: Overall {s['overall_accuracy']*100:.1f}% | "
+                          f"Buy {s['buy_accuracy']*100:.1f}% | Sell {s['sell_accuracy']*100:.1f}%")
+            else:
+                print("⚠️ No voting data found yet (table is new)")
+
+            return final_scores
+
+        except Exception as e:
+            print(f"⚠️ Error calculating voting accuracy: {e}")
+            return {}
+        finally:
+            close_db_connection(conn)
+
+    # ========== Save ==========
+
+    def save_models_to_db(self, models, results, retry=3):
+        """Save model accuracy info to dl_models_v2 table using a safe, non-destructive approach."""
+        for attempt in range(retry):
+            conn = None  # Initialize conn to None for each attempt
+            try:
+                conn = self._get_conn()
+                if not conn:
+                    print(f"⚠️ Attempt {attempt+1}/{retry}: No database connection available. Retrying...")
+                    time.sleep(5) # Wait longer if the pool is empty
+                    continue
+
+                print(f"🔄 Attempt {attempt+1}/{retry}: Saving models to database...")
+                with conn.cursor() as cursor:
+                    cursor.execute("SET statement_timeout = '300s';")
+                    # Step 1: Create the table if it doesn't already exist.
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS dl_models_v2 (
+                            id         SERIAL PRIMARY KEY,
+                            model_name VARCHAR(50)  NOT NULL,
+                            model_type VARCHAR(50)  NOT NULL,
+                            accuracy   FLOAT,
+                            trained_at TIMESTAMP    DEFAULT NOW(),
+                            status     VARCHAR(20)  DEFAULT 'active',
+                            model_data BYTEA,       -- Store pickled model
+                            CONSTRAINT uq_model_name_type UNIQUE (model_name, model_type)
+                        );
+                    """)
+
+                    # Step 2: Use INSERT ... ON CONFLICT to update or insert.
+                    for model_name, model_obj in models.items():
+                        if model_obj is None:
+                            continue
+                        accuracy = results.get(f'{model_name}_accuracy', 0)
+                        
+                        # Pickle the model object to store it
+                        pickled_model = pickle.dumps(model_obj)
+
+                        cursor.execute("""
+                            INSERT INTO dl_models_v2 (model_name, model_type, accuracy, trained_at, model_data)
+                            VALUES (%s, %s, %s, NOW(), %s)
+                            ON CONFLICT (model_name, model_type) 
+                            DO UPDATE SET
+                                accuracy = EXCLUDED.accuracy,
+                                trained_at = EXCLUDED.trained_at,
+                                model_data = EXCLUDED.model_data;
+                        """, (model_name, 'LightGBM', float(accuracy), psycopg2.Binary(pickled_model)))
+
+                conn.commit()
+                print("✅ Models info saved to database (dl_models_v2)")
+                return True
+
+            except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+                print(f"❌ Attempt {attempt+1}/{retry} failed with connection error: {e}")
+                if conn:
+                    try:
+                        close_db_connection(conn)
+                    except Exception as close_e:
+                        print(f"- Error while closing failed connection: {close_e}")
+                if attempt < retry - 1:
+                    time.sleep(5) # Wait before retrying
+            except Exception as e:
+                print(f"❌ Attempt {attempt+1}/{retry} failed with general error: {e}")
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception as rb_e:
+                        print(f"- Error during rollback: {rb_e}")
+                if attempt < retry - 1:
+                    time.sleep(2)
+            finally:
+                if conn:
+                    close_db_connection(conn)
+        
+        send_critical_alert(
+            "DB Save Failure", 
+            "Failed to save models to the database after multiple retries.",
+            f"Check database connectivity and logs."
+        )
+        return False
+
+    def load_symbol_memory(self):
+        """Load symbol memory for all symbols."""
+        conn = self._get_conn()
+        if not conn:
+            return {}
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT * FROM symbol_memory")
+                rows = cursor.fetchall()
+            memory = {row['symbol']: dict(row) for row in rows}
+            print(f"🧠 Loaded symbol memory for {len(memory)} symbols.")
+            return memory
+        except Exception as e:
+            print(f"⚠️ Error loading symbol memory: {e}")
+            return {}
+        finally:
+            close_db_connection(conn)
+
+    def load_causal_data(self, limit=10000):
+        """Load causal data for training."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT * FROM causal_data
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (limit,))
+                rows = cursor.fetchall()
+            print(f"🔗 Loaded {len(rows)} causal data records.")
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"⚠️ Error loading causal data: {e}")
+            return []
+        finally:
+            close_db_connection(conn)
+
+    def get_new_trades_count(self):
+        """Returns (count, since_timestamp). Each model trains independently on new trades."""
+        conn = self._get_conn()
+        if not conn:
+            return 0, None
+        try:
+            with conn.cursor() as cursor:
+                # Get ALL models and their training times
+                cursor.execute("""
+                    SELECT model_name, trained_at 
+                    FROM dl_models_v2
+                """)
+                rows = cursor.fetchall()
+                
+                # Create dict of model_name -> trained_at
+                model_times = {row[0]: row[1] for row in rows}
+                
+                # Define required models
+                required_models = [
+                    'smart_money', 'risk', 'anomaly', 'exit', 'pattern',
+                    'liquidity', 'chart_cnn', 'sentiment', 'crypto_news',
+                    'volume_pred', 'meta_learner'
+                ]
+                
+                # Find missing models - all models including meta_learner
+                missing_models = [m for m in required_models if m not in model_times]
+                
+                if not model_times:
+                    # No models at all → first training
+                    print("ℹ️ No models found → will train on ALL trades")
+                    return 999999, None
+                
+                if missing_models:
+                    # Only missing models get ALL trades, not all models
+                    print(f"ℹ️ Missing models: {missing_models} → these will train on ALL trades")
+                    # Return special flag for per-model training
+                    return -1, missing_models  # -1 means "check per model"
+                
+                # All models exist → check for new trades AND new news
+                oldest_training = min(model_times.values())
+                
+                # Count new trades
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM trades_history
+                    WHERE action = 'SELL'
+                      AND timestamp > %s
+                """, (oldest_training,))
+                new_trades = cursor.fetchone()[0]
+                
+                # Count new news (for sentiment and crypto_news models)
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM news_sentiment
+                    WHERE timestamp > %s
+                """, (oldest_training,))
+                new_news = cursor.fetchone()[0]
+
+                total_new = new_trades + new_news
+                print(f"📊 {new_trades} new trades + {new_news} new news = {total_new} total")
+                
+                # Return special marker if only news (no trades) - for sentiment/crypto_news
+                if new_trades == 0 and new_news > 0:
+                    return total_new, "NEWS_ONLY"  # Signal: only news, no trades
+                
+                return total_new, oldest_training
+
+        except Exception as e:
+            print(f"⚠️ Error counting new trades: {e}")
+            return 0, None
+        finally:
+            close_db_connection(conn)
+    
+    def get_existing_model_timestamp(self):
+        """Get oldest training timestamp among existing models."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT MIN(trained_at) FROM dl_models_v2")
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except:
+            return None
