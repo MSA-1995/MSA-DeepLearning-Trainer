@@ -248,7 +248,7 @@ def train_risk_model(trades, voting_scores=None):
         base.extend([rsi, atr, scores.get('tp_accuracy', 0.5), scores.get('sell_accuracy', 0.5)])
         return base
 
-    names = BASE_NAMES + ['rsi', 'atr', 'tp_accuracy', 'sell_accuracy']
+    names = BASE_NAMES + ['risk_rsi', 'risk_atr', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
         return 1 if t.get('trade_quality') in ['TRAP', 'RISKY'] else 0
@@ -323,7 +323,7 @@ def train_pattern_model(trades, voting_scores=None):
         base.extend([momentum, scores.get('tp_accuracy', 0.5), scores.get('sell_accuracy', 0.5)])
         return base
 
-    names = BASE_NAMES + ['price_momentum', 'tp_accuracy', 'sell_accuracy']
+    names = BASE_NAMES + ['pattern_momentum', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
         return 1 if t.get('trade_quality') in ['GREAT'] else 0
