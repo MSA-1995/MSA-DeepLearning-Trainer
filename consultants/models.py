@@ -130,9 +130,18 @@ def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None
             price_impact = liq.get('price_impact', 0.5)
             good_liq = 1 if liq_score > 70 else 0
             
-            features = base + [is_great, is_trap, hours_held, is_profit,
-                               news_score, news_pos, news_neg, news_total, news_ratio, has_news, sent_score,
-                               liq_score, depth_ratio, price_impact, good_liq]
+            # Build features to match names exactly
+            features = base + [
+                is_great, is_trap, hours_held, is_profit,
+                news_score, news_pos, news_neg, news_total, news_ratio, has_news, sent_score,
+                liq_score, depth_ratio, price_impact, good_liq,
+                trap_count, was_trapped, repeat_trap,
+                sym_win_rate, sym_avg_profit, sym_trap_count, sym_total, sym_is_reliable,
+                fear_greed, whale_activity, exchange_inflow, social_volume, market_sent,
+                fear_greed_norm, is_fearful, is_greedy,
+                consensus, buy_count, sell_count,
+                risk_score, opportunity, market_quality
+            ] + opinions
             meta_features.append(features)
             final_labels.append(1 if profit > 0.5 else 0)
         except:
