@@ -132,8 +132,11 @@ class DeepLearningTrainerLightGBM:
             
             # Check if only news (no new trades)
             if since_timestamp == "NEWS_ONLY":
-                print("📰 Only new news found - sentiment and crypto_news will train")
-                trades_new = self.db.load_training_data(since_timestamp=None)  # Load all for now
+                print("📰 Only new news found - sentiment and crypto_news will train on NEW only")
+                # Get oldest training time to use as real timestamp
+                oldest_training = self.db.get_existing_model_timestamp()
+                since_timestamp = oldest_training  # Replace "NEWS_ONLY" with real timestamp
+                trades_new = self.db.load_training_data(since_timestamp=oldest_training) if oldest_training else []
                 if not trades_new:
                     trades_new = []
             else:
@@ -165,8 +168,8 @@ class DeepLearningTrainerLightGBM:
                     continue
                 
                 try:
-                    # Pass since_timestamp to train only new data (not "NEWS_ONLY")
-                    ts_for_news = None if model_name in missing_models or since_timestamp == "NEWS_ONLY" else since_timestamp
+                    # Pass since_timestamp to train only new data
+                    ts_for_news = None if model_name in missing_models else since_timestamp
                     result = train_fn(trades_new, voting_scores, since_timestamp=ts_for_news)
                     if result:
                         model, accuracy = result
