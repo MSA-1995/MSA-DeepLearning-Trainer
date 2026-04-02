@@ -206,14 +206,20 @@ class DeepLearningTrainerLightGBM:
                 print(f"❌ {model_name} training error: {e}")
 
         try:
-            # Meta-learner trains ONLY when there are NEW trades (never when models are missing)
-            if new_trades_count > 0 and isinstance(since_timestamp, str) and since_timestamp != "NEWS_ONLY":
-                print(f"\n👑🧠 Meta-Learner: training with new trades since {since_timestamp}...")
+            # Meta-learner trains when there are trades (first training OR new trades)
+            can_train_meta = (
+                new_trades_count > 0 and 
+                (since_timestamp is None or (isinstance(since_timestamp, str) and since_timestamp != "NEWS_ONLY"))
+            )
+            if can_train_meta:
+                print(f"\n👑🧠 Meta-Learner: training with trades...")
                 meta_result = train_meta_learner_model(self.db, trained_consultants, voting_scores, since_timestamp=since_timestamp)
                 if meta_result:
                     self.models['meta_learner'], results['meta_learner_accuracy'] = meta_result
+                else:
+                    print("\n👑🧠 Meta-Learner: training returned None (not enough data)")
             else:
-                print("\n👑🧠 Meta-Learner: skipping (no new trades)")
+                print(f"\n👑🧠 Meta-Learner: skipping (new_trades_count={new_trades_count}, since_timestamp={since_timestamp})")
         except Exception as e:
             print(f"❌ meta_learner training error: {e}")
             send_critical_alert("Model Training Error", "Meta-Learner failed to train", str(e))
@@ -241,7 +247,7 @@ class DeepLearningTrainerLightGBM:
         return True
 
     def save_all_models(self):
-        """Save all trained models to .pkl files"""
+        """Save all trained models to .pkl files - skip models with 0 accuracy"""
         print("\n💾 Saving LightGBM models...")
         base_dir = os.path.dirname(os.path.dirname(__file__))
         trained_models_dir = os.path.join(base_dir, 'trained_models')
