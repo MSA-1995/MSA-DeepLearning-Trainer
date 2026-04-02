@@ -75,16 +75,22 @@ def train_meta_learner_model(db_manager, trained_models=None, voting_scores=None
     meta_features, final_labels = [], []
 
     # Load trades - NEW only if since_timestamp provided
-    if since_timestamp:
-        print(f"  -> Processing NEW trades since {since_timestamp}...")
-        trades_batch = db_manager.load_training_data(since_timestamp=since_timestamp)
-    else:
-        print(f"  -> Processing ALL {total_trades} trades (first training)...")
-        trades_batch = db_manager.load_training_data(limit=total_trades)
-        if not trades_batch:
-            return None
+    try:
+        if since_timestamp:
+            print(f"  -> Processing NEW trades since {since_timestamp}...")
+            trades_batch = db_manager.load_training_data(since_timestamp=since_timestamp)
+        else:
+            print(f"  -> Processing ALL {total_trades} trades (first training)...")
+            trades_batch = db_manager.load_training_data(limit=total_trades)
+    except Exception as e:
+        print(f"❌ Error loading trades: {e}")
+        return None
+    
+    if not trades_batch:
+        print("⚠️ No trades found for training")
+        return None
 
-        for trade in [dict(t) for t in trades_batch]:
+    for trade in [dict(t) for t in trades_batch]:
             try:
                 raw_data = trade.get('data', {})
                 if isinstance(raw_data, str):
