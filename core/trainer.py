@@ -206,14 +206,14 @@ class DeepLearningTrainerLightGBM:
                 print(f"❌ {model_name} training error: {e}")
 
         try:
-            # Meta-learner trains when: missing, or new trades (not just news)
-            if new_trades_count == -1 or (new_trades_count > 0 and since_timestamp != "NEWS_ONLY"):
-                print("\n👑🧠 Meta-Learner: training...")
-                meta_result = train_meta_learner_model(self.db, trained_consultants, voting_scores)
+            # Meta-learner trains ONLY when there are NEW trades (never when models are missing)
+            if new_trades_count > 0 and isinstance(since_timestamp, str) and since_timestamp != "NEWS_ONLY":
+                print(f"\n👑🧠 Meta-Learner: training with new trades since {since_timestamp}...")
+                meta_result = train_meta_learner_model(self.db, trained_consultants, voting_scores, since_timestamp=since_timestamp)
                 if meta_result:
                     self.models['meta_learner'], results['meta_learner_accuracy'] = meta_result
             else:
-                print("\n👑🧠 Meta-Learner: skipping (only news, no new trades)")
+                print("\n👑🧠 Meta-Learner: skipping (no new trades)")
         except Exception as e:
             print(f"❌ meta_learner training error: {e}")
             send_critical_alert("Model Training Error", "Meta-Learner failed to train", str(e))
