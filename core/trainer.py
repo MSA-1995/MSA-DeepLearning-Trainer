@@ -43,7 +43,7 @@ TRAIN_PIPELINE = [
 ]
 
 
-class DeepLearningTrainerXGBoost:
+class DeepLearningTrainerLightGBM:
     def __init__(self):
         self.db     = DatabaseManager()
         self.models = {name: None for name, _ in TRAIN_PIPELINE}
