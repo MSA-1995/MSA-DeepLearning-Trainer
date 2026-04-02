@@ -59,17 +59,27 @@ class SentimentAnalyzer:
         print("\n🎭 Training Sentiment Analysis Model...")
 
         features_list, labels_list = [], []
+        skipped_no_data = 0
+        
         for trade in trades:
             try:
                 data = trade.get('data', {})
                 if isinstance(data, str):
                     data = json.loads(data)
                 sentiment_data = data.get('sentiment', {})
+                
+                # تخطي الصفقات بدون بيانات مشاعر حقيقية
+                if not sentiment_data or sentiment_data.get('fear_greed_index', 50) == 50 and sentiment_data.get('positive_ratio', 0.33) == 0.33:
+                    skipped_no_data += 1
+                    continue
+                
                 features_list.append(self.extract_features(sentiment_data))
                 profit = float(trade.get('profit_percent', 0))
                 labels_list.append(1 if profit > 0.8 else 0)
             except:
                 continue
+        
+        print(f"  📊 Training samples: {len(features_list)} trades (skipped {skipped_no_data} without sentiment data)")
 
         if len(features_list) < 50:
             print("⚠️ Not enough data for Sentiment Model")
