@@ -93,11 +93,11 @@ if not os.getenv('ENCRYPTION_KEY'):
         print(f"❌ Error reading encryption key from flash drive: {e}")
 
 # ========== MAIN ==========#
-from trainer import DeepLearningTrainerXGBoost
+from trainer import DeepLearningTrainerLightGBM
 
 def main():
     try:
-        trainer = DeepLearningTrainerXGBoost()
+        trainer = DeepLearningTrainerLightGBM()
         trainer.run_continuous(interval_hours=6)
 
     except Exception as e:
