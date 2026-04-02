@@ -218,6 +218,22 @@ class DeepLearningTrainerLightGBM:
             print(f"❌ meta_learner training error: {e}")
             send_critical_alert("Model Training Error", "Meta-Learner failed to train", str(e))
 
+        # Load old accuracies for models that didn't train this session
+        try:
+            conn = self.db._get_conn()
+            if conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT model_name, accuracy FROM dl_models_v2")
+                    for row in cursor.fetchall():
+                        name, acc = row
+                        key = f"{name}_accuracy"
+                        if key not in results and acc is not None:
+                            results[key] = float(acc)
+                from database import close_db_connection
+                close_db_connection(conn)
+        except Exception as e:
+            print(f"Could not load old accuracies: {e}")
+
         self.save_all_models()
         self.db.save_models_to_db(self.models, results)
 
