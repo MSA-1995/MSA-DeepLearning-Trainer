@@ -65,17 +65,27 @@ class CryptoNewsAnalyzer:
         print("\n📰 Training Crypto News Model...")
 
         features_list, labels_list = [], []
+        skipped_no_data = 0
+        
         for trade in trades:
             try:
                 data = trade.get('data', {})
                 if isinstance(data, str):
                     data = json.loads(data)
                 news_data = data.get('news', {})
+                
+                # تخطي الصفقات بدون بيانات أخبار حقيقية
+                if not news_data or news_data.get('news_count_24h', 0) == 0:
+                    skipped_no_data += 1
+                    continue
+                
                 features_list.append(self.extract_features(news_data))
                 profit = float(trade.get('profit_percent', 0))
                 labels_list.append(1 if profit > 0.8 else 0)
             except:
                 continue
+        
+        print(f"  📊 Training samples: {len(features_list)} trades (skipped {skipped_no_data} without news data)")
 
         if len(features_list) < 50:
             print("⚠️ Not enough data for Crypto News Model")
