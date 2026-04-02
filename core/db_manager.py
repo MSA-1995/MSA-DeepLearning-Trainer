@@ -27,8 +27,8 @@ class DatabaseManager:
 
     # ========== Load ==========
 
-    def load_training_data(self, limit=None, offset=None):
-        """Load historical SELL trades for training, with support for batching."""
+    def load_training_data(self, since_timestamp=None, limit=None, offset=None):
+        """Load SELL trades for training. If since_timestamp is None, loads ALL trades (first training)."""
         conn = self._get_conn()
         if not conn:
             return None
@@ -39,9 +39,16 @@ class DatabaseManager:
                     FROM trades_history
                     WHERE action = 'SELL'
                       AND data IS NOT NULL
-                    ORDER BY timestamp DESC
                 """
                 params = []
+                
+                # Only filter by timestamp if since_timestamp is provided
+                if since_timestamp is not None:
+                    query += " AND timestamp > %s"
+                    params.append(since_timestamp)
+                
+                query += " ORDER BY timestamp DESC"
+                
                 if limit is not None:
                     query += " LIMIT %s"
                     params.append(limit)
@@ -342,13 +349,13 @@ class DatabaseManager:
             close_db_connection(conn)
 
     def get_new_trades_count(self):
-        """عدد الصفقات الجديدة منذ آخر تدريب - يفحص كل نموذج بشكل مستقل"""
+        """Returns (count, since_timestamp). If first training, returns (999999, None)."""
         conn = self._get_conn()
         if not conn:
-            return 0
+            return 0, None
         try:
             with conn.cursor() as cursor:
-                # جلب آخر trained_at لكل نموذج بشكل مستقل
+                # Get all model training times
                 cursor.execute("""
                     SELECT model_name, trained_at 
                     FROM dl_models_v2 
@@ -357,20 +364,20 @@ class DatabaseManager:
                 rows = cursor.fetchall()
 
                 if not rows:
-                    # لا يوجد أي نموذج → تدريب من الصفر
-                    print("ℹ️ No models found → will train from scratch")
-                    return 999999
+                    # No models found → first training, load ALL trades
+                    print("ℹ️ No models found → will train on ALL trades (first training)")
+                    return 999999, None
 
-                # أقدم trained_at بين كل النماذج
+                # Oldest training timestamp among all models
                 oldest_training = rows[0][1]
-                missing_models  = 11 - len(rows)  # 11 نموذج مطلوب
+                missing_models = 11 - len(rows)  # 11 models required
 
                 if missing_models > 0:
-                    # فيه نماذج ناقصة → تدريب من الصفر لها
-                    print(f"ℹ️ {missing_models} models missing → will retrain all")
-                    return 999999
+                    # Missing models → retrain on ALL trades
+                    print(f"ℹ️ {missing_models} models missing → will train on ALL trades")
+                    return 999999, None
 
-                # كل النماذج موجودة → فحص الصفقات الجديدة منذ أقدم تدريب
+                # All models exist → count new trades since oldest training
                 cursor.execute("""
                     SELECT COUNT(*)
                     FROM trades_history
@@ -379,9 +386,11 @@ class DatabaseManager:
                 """, (oldest_training,))
                 new_trades = cursor.fetchone()[0]
 
-            return new_trades
+                print(f"📊 {new_trades} new trades since {oldest_training}")
+                return new_trades, oldest_training
+
         except Exception as e:
             print(f"⚠️ Error counting new trades: {e}")
-            return 0
+            return 0, None
         finally:
             close_db_connection(conn)
