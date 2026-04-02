@@ -259,6 +259,11 @@ class DatabaseManager:
                             continue
                         accuracy = results.get(f'{model_name}_accuracy', 0)
                         
+                        # Skip saving if accuracy is 0 or negative (training failed or bad data)
+                        if accuracy <= 0:
+                            print(f"  ⚠️ {model_name}: accuracy={accuracy}, skipping save (not overwriting DB)")
+                            continue
+                        
                         # Pickle the model object to store it
                         pickled_model = pickle.dumps(model_obj)
 
@@ -271,6 +276,7 @@ class DatabaseManager:
                                 trained_at = EXCLUDED.trained_at,
                                 model_data = EXCLUDED.model_data;
                         """, (model_name, 'LightGBM', float(accuracy), psycopg2.Binary(pickled_model)))
+                        print(f"  ✅ {model_name}: saved with accuracy={accuracy*100:.1f}%")
 
                 conn.commit()
                 print("✅ Models info saved to database (dl_models_v2)")
