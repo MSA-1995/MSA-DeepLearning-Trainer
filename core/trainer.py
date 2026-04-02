@@ -84,28 +84,68 @@ class DeepLearningTrainerLightGBM:
     # ========== Training ==========
 
     def train_all_models(self):
-        """Train all models - only on new trades since last training."""
+        """Train models - missing models train on ALL trades, existing models train on NEW trades only."""
         print("\n" + "=" * 60)
-        print("👑 Starting Training - 12 LightGBM Models")
+        print("👑 Starting Training - 11 LightGBM Models")
         print("=" * 60)
 
-        new_trades_count = self.db.get_new_trades_count()
-        print(f"📊 New trades since last training: {new_trades_count}")
-
+        new_trades_count, since_timestamp = self.db.get_new_trades_count()
+        
         if new_trades_count == 0:
-            print("⏭️ No new trades found. Skipping training cycle.")
+            print("⏭️ No new trades or news found. Skipping training cycle.")
             return False
 
-        print(f"✅ Found {new_trades_count} new trades. Starting training...")
-        trades = self.db.load_training_data()
-        if not trades:
-            return False
-
+        # Handle per-model training for missing models
+        if new_trades_count == -1 and isinstance(since_timestamp, list):
+            missing_models = since_timestamp
+            print(f"ℹ️ Missing models: {missing_models}")
+            print(f"📊 Missing models will train on ALL trades")
+            
+            # Separate sentiment/crypto_news from other missing models
+            missing_trade_models = [m for m in missing_models if m not in ['sentiment', 'crypto_news']]
+            missing_news_models = [m for m in missing_models if m in ['sentiment', 'crypto_news']]
+            
+            if missing_trade_models:
+                trades_all = self.db.load_training_data(since_timestamp=None)
+            else:
+                trades_all = None
+            
+            trades_new = self.db.load_training_data(since_timestamp=self.db.get_existing_model_timestamp())
+            if trades_all is None:
+                trades_all = trades_new
+        elif since_timestamp is None:
+            # First training → load ALL trades
+            print(f"📊 First training → loading ALL trades")
+            trades_all = self.db.load_training_data(since_timestamp=None)
+            trades_new = trades_all
+            missing_models = [
+                'smart_money', 'risk', 'anomaly', 'exit', 'pattern',
+                'liquidity', 'chart_cnn', 'sentiment', 'crypto_news',
+                'volume_pred', 'meta_learner'
+            ]
+            if not trades_all:
+                return False
+        else:
+            print(f"📊 Loading new data since {since_timestamp}")
+            trades_all = None
+            missing_models = []
+            
+            # Check if only news (no new trades)
+            if since_timestamp == "NEWS_ONLY":
+                print("📰 Only new news found - sentiment and crypto_news will train")
+                trades_new = self.db.load_training_data(since_timestamp=None)  # Load all for now
+                if not trades_new:
+                    trades_new = []
+            else:
+                trades_new = self.db.load_training_data(since_timestamp=since_timestamp)
+                if not trades_new:
+                    trades_new = []
+        
         results = {}
         trained_consultants = {}
 
         try:
-            voting_scores = self.db.calculate_voting_accuracy(trades)
+            voting_scores = self.db.calculate_voting_accuracy(trades_new)
         except Exception as e:
             print(f"⚠️ Voting accuracy error: {e}")
             voting_scores = {}
@@ -113,6 +153,43 @@ class DeepLearningTrainerLightGBM:
         for model_name, train_fn in TRAIN_PIPELINE:
             if model_name == 'meta_learner':
                 continue
+            
+            # sentiment and crypto_news always train from news_sentiment table
+            if model_name in ['sentiment', 'crypto_news']:
+                if model_name in missing_models:
+                    print(f"  📊 {model_name}: training from news_sentiment (missing model)")
+                elif new_trades_count > 0:
+                    print(f"  📊 {model_name}: training from news_sentiment (new data)")
+                else:
+                    print(f"  ⏭️ {model_name}: skipping (no new news)")
+                    continue
+                
+                try:
+                    result = train_fn(trades_new, voting_scores)
+                    if result:
+                        model, accuracy = result
+                        self.models[model_name] = model
+                        trained_consultants[model_name] = model
+                        results[f'{model_name}_accuracy'] = accuracy
+                except Exception as e:
+                    print(f"❌ {model_name} training error: {e}")
+                continue
+            
+            # Skip other models if no new trades
+            if model_name not in missing_models:
+                if not trades_new or len(trades_new) == 0:
+                    print(f"  ⏭️ {model_name}: skipping (no new trades)")
+                    continue
+                trades = trades_new
+                print(f"  📊 {model_name}: training on NEW trades only")
+            else:
+                # Missing model - train on all trades
+                if not trades_all or len(trades_all) == 0:
+                    print(f"  ⏭️ {model_name}: skipping (no data)")
+                    continue
+                trades = trades_all
+                print(f"  📊 {model_name}: training on ALL trades")
+            
             try:
                 result = train_fn(trades, voting_scores)
                 if result:
@@ -124,9 +201,13 @@ class DeepLearningTrainerLightGBM:
                 print(f"❌ {model_name} training error: {e}")
 
         try:
-            meta_result = train_meta_learner_model(self.db, trained_consultants, voting_scores)
-            if meta_result:
-                self.models['meta_learner'], results['meta_learner_accuracy'] = meta_result
+            # Meta-learner only trains when there are new trades, not just news
+            if new_trades_count > 0 and since_timestamp != "NEWS_ONLY":
+                meta_result = train_meta_learner_model(self.db, trained_consultants, voting_scores)
+                if meta_result:
+                    self.models['meta_learner'], results['meta_learner_accuracy'] = meta_result
+            else:
+                print("\n👑🧠 Meta-Learner: skipping (only news, no new trades)")
         except Exception as e:
             print(f"❌ meta_learner training error: {e}")
             send_critical_alert("Model Training Error", "Meta-Learner failed to train", str(e))
@@ -134,7 +215,7 @@ class DeepLearningTrainerLightGBM:
         self.save_all_models()
         self.db.save_models_to_db(self.models, results)
 
-        print("\n✅ All 12 LightGBM models trained successfully!")
+        print("\n✅ All LightGBM models trained successfully!")
         return True
 
     def save_all_models(self):
