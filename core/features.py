@@ -222,6 +222,13 @@ def calculate_enhanced_features(data, trade=None):
         flash_crash_detected = 1 if flash_crash.get('flash_crash_detected', False) else 0
         whale_dump_detected = 1 if flash_crash.get('whale_dump_detected', False) else 0
         cascade_risk_score = flash_crash.get('cascade_risk', {}).get('score', 0) / 100.0
+
+        # Whale Confidence (normalize -25 to 25 to -1 to 1)
+        whale_confidence = (trade.get('whale_confidence', 0) / 25.0) if trade else 0
+
+        # Additional Data
+        atr_value = trade.get('atr_value', 0) if trade else 0
+        sentiment_score = trade.get('sentiment_score', 0) if trade else 0
         
         return [
             # 15 الميزات التقليدية
@@ -256,7 +263,10 @@ def calculate_enhanced_features(data, trade=None):
             flash_risk_score,       # 35
             flash_crash_detected,   # 36
             whale_dump_detected,    # 37
-            cascade_risk_score      # 38
+            cascade_risk_score,     # 38
+            whale_confidence,      # 39
+            atr_value,             # 40
+            sentiment_score        # 41
         ]
     except Exception as e:
         print(f"⚠️ Feature calculation error: {e}")
@@ -298,5 +308,10 @@ def get_feature_names():
         'flash_risk_score',
         'flash_crash_detected',
         'whale_dump_detected',
-        'cascade_risk_score'
+        'cascade_risk_score',
+        # Whale Confidence (1)
+        'whale_confidence',
+        # Additional Data (2)
+        'atr_value',
+        'sentiment_score'
     ]
