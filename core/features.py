@@ -229,6 +229,8 @@ def calculate_enhanced_features(data, trade=None):
         # Additional Data
         atr_value = trade.get('atr_value', 0) if trade else 0
         sentiment_score = trade.get('sentiment_score', 0) if trade else 0
+        panic_score = trade.get('panic_score', 0) if trade else 0
+        optimism_penalty = trade.get('optimism_penalty', 0) if trade else 0
         
         return [
             # 15 الميزات التقليدية
@@ -266,7 +268,9 @@ def calculate_enhanced_features(data, trade=None):
             cascade_risk_score,     # 38
             whale_confidence,      # 39
             atr_value,             # 40
-            sentiment_score        # 41
+            sentiment_score,       # 41
+            panic_score,           # 42
+            optimism_penalty       # 43
         ]
     except Exception as e:
         print(f"⚠️ Feature calculation error: {e}")
@@ -311,7 +315,9 @@ def get_feature_names():
         'cascade_risk_score',
         # Whale Confidence (1)
         'whale_confidence',
-        # Additional Data (2)
+        # Additional Data (4)
         'atr_value',
-        'sentiment_score'
+        'sentiment_score',
+        'panic_score',
+        'optimism_penalty'
     ]
