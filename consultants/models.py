@@ -31,14 +31,31 @@ def _build_dataset(trades, feature_fn, label_fn):
 def _train_lgb(X, y, feature_names, n_estimators=300, max_depth=7, learning_rate=0.05):
     X_df = pd.DataFrame(X, columns=feature_names)
     y_s  = pd.Series(y, name='target')
+    
+    # تحقق من التوزيع
+    pos = int(sum(y_s))
+    neg = int(len(y_s) - pos)
+    ratio = neg / max(pos, 1)
+    print(f"    Label balance: {pos} positive ({pos/len(y_s)*100:.1f}%) | {neg} negative | ratio={ratio:.1f}x")
+    
     X_train, X_test, y_train, y_test = train_test_split(X_df, y_s, test_size=0.2, random_state=42, stratify=y_s)
     model = lgb.LGBMClassifier(
         n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-        num_leaves=63, min_child_samples=10, subsample=0.8, colsample_bytree=0.8,
+        num_leaves=63, min_child_samples=5, subsample=0.8, colsample_bytree=0.8,
+        class_weight='balanced',  # ✅ الإصلاح الرئيسي: موازنة الـ labels
         random_state=42, verbose=-1
     )
     model.fit(X_train, y_train)
-    return model, accuracy_score(y_test, model.predict(X_test))
+    acc = accuracy_score(y_test, model.predict(X_test))
+    
+    # طباعة precision/recall للتحقق من جودة التدريب
+    from sklearn.metrics import classification_report
+    report = classification_report(y_test, model.predict(X_test), output_dict=True, zero_division=0)
+    p1 = report.get('1', {}).get('precision', 0)
+    r1 = report.get('1', {}).get('recall', 0)
+    print(f"    Class-1 → Precision: {p1:.2f} | Recall: {r1:.2f}")
+    
+    return model, acc
 
 
 # Base feature names (38 features from calculate_enhanced_features)
@@ -225,14 +242,17 @@ def train_smart_money_model(trades, voting_scores=None):
     names = BASE_NAMES + ['whale_activity', 'exchange_inflow', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
-        return 1 if t.get('trade_quality') in ['GREAT'] else 0
+        # ✅ توسيع: GREAT + GOOD + ربح ممتاز = smart money
+        profit = float(t.get('profit_percent', 0))
+        tq = t.get('trade_quality', 'OK')
+        return 1 if (tq in ['GREAT', 'GOOD'] or profit >= 1.5) else 0
 
     fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("Not enough data for Smart Money")
         return None
     model, acc = _train_lgb(fl, np.array(ll), names)
-    print(f"Smart Money Model: Accuracy {acc*100:.2f}% | Learns: GREAT trades")
+    print(f"Smart Money Model: Accuracy {acc*100:.2f}% | Learns: GREAT/GOOD trades")
     return model, acc
 
 
@@ -251,14 +271,17 @@ def train_risk_model(trades, voting_scores=None):
     names = BASE_NAMES + ['risk_rsi', 'risk_atr', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
-        return 1 if t.get('trade_quality') in ['TRAP', 'RISKY'] else 0
+        # ✅ توسيع: أي ربح سالب = خطر، ليس فقط TRAP/RISKY
+        profit = float(t.get('profit_percent', 0))
+        tq = t.get('trade_quality', 'OK')
+        return 1 if (tq in ['TRAP', 'RISKY'] or profit < -0.3) else 0
 
     fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("Not enough data for Risk")
         return None
     model, acc = _train_lgb(fl, np.array(ll), names)
-    print(f"Risk Model: Accuracy {acc*100:.2f}% | Learns: TRAP/RISKY trades")
+    print(f"Risk Model: Accuracy {acc*100:.2f}% | Learns: TRAP/RISKY/loss trades")
     return model, acc
 
 
@@ -276,14 +299,17 @@ def train_anomaly_model(trades, voting_scores=None):
     names = BASE_NAMES + ['anomaly_score', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
-        return 1 if t.get('trade_quality') in ['RISKY'] else 0
+        # ✅ توسيع: RISKY + TRAP + خسارة كبيرة = anomaly
+        profit = float(t.get('profit_percent', 0))
+        tq = t.get('trade_quality', 'OK')
+        return 1 if (tq in ['RISKY', 'TRAP'] or profit < -0.5) else 0
 
     fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("Not enough data for Anomaly")
         return None
     model, acc = _train_lgb(fl, np.array(ll), names)
-    print(f"Anomaly Model: Accuracy {acc*100:.2f}% | Learns: RISKY trades")
+    print(f"Anomaly Model: Accuracy {acc*100:.2f}% | Learns: RISKY/TRAP/loss trades")
     return model, acc
 
 
@@ -326,14 +352,17 @@ def train_pattern_model(trades, voting_scores=None):
     names = BASE_NAMES + ['pattern_momentum', 'tp_accuracy', 'sell_accuracy']
 
     def label(t):
-        return 1 if t.get('trade_quality') in ['GREAT'] else 0
+        # ✅ توسيع: GREAT + GOOD = نمط ناجح
+        profit = float(t.get('profit_percent', 0))
+        tq = t.get('trade_quality', 'OK')
+        return 1 if (tq in ['GREAT', 'GOOD'] or profit >= 1.0) else 0
 
     fl, ll = _build_dataset(trades, features, label)
     if len(fl) < 50:
         print("Not enough data for Pattern")
         return None
     model, acc = _train_lgb(fl, np.array(ll), names)
-    print(f"Pattern Model: Accuracy {acc*100:.2f}% | Learns: GREAT patterns")
+    print(f"Pattern Model: Accuracy {acc*100:.2f}% | Learns: GREAT/GOOD patterns")
     return model, acc
 
 
