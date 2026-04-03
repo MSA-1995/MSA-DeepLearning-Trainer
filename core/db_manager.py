@@ -40,14 +40,14 @@ class DatabaseManager:
                 if since_timestamp is None:
                     # Load ALL trades
                     cursor.execute("""
-                        SELECT symbol, profit_percent, action, timestamp, data
+                        SELECT symbol, profit_percent, action, timestamp, whale_confidence, atr_value, sentiment_score, data
                         FROM trades_history
                         WHERE action = 'SELL' AND data IS NOT NULL
                     """)
                 else:
                     # Load NEW trades
                     cursor.execute("""
-                        SELECT symbol, profit_percent, action, timestamp, data
+                        SELECT symbol, profit_percent, action, timestamp, whale_confidence, atr_value, sentiment_score, data
                         FROM trades_history
                         WHERE action = 'SELL' AND data IS NOT NULL
                           AND timestamp > %s
