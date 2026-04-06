@@ -40,17 +40,16 @@ class DatabaseManager:
                 if since_timestamp is None:
                     # Load ALL trades
                     cursor.execute("""
-                        SELECT symbol, profit_percent, action, timestamp, whale_confidence, atr_value, sentiment_score, panic_score, optimism_penalty, psychological_analysis, data
+                        SELECT *
                         FROM trades_history
                         WHERE action = 'SELL' AND data IS NOT NULL
                     """)
                 else:
                     # Load NEW trades
                     cursor.execute("""
-                        SELECT symbol, profit_percent, action, timestamp, whale_confidence, atr_value, sentiment_score, panic_score, optimism_penalty, psychological_analysis, data
+                        SELECT *
                         FROM trades_history
-                        WHERE action = 'SELL' AND data IS NOT NULL
-                          AND timestamp > %s
+                        WHERE action = 'SELL' AND data IS NOT NULL AND timestamp > %s
                     """, (since_timestamp,))
                 
                 trades = cursor.fetchall()
