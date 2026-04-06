@@ -297,7 +297,11 @@ class DatabaseManager:
                     if model_obj is None:
                         continue
                     accuracy = results.get(f'{model_name}_accuracy', 0)
+                    # Normalize accuracy: handle both fraction (0.78) and percentage (78.0)
+                    if accuracy > 1.0:
+                        accuracy = accuracy / 100.0
                     if accuracy < 0.01:
+                        print(f"  ⏭️ {model_name}: skipping (accuracy too low: {accuracy:.3f})")
                         continue
                     
                     try:
@@ -309,10 +313,12 @@ class DatabaseManager:
                         
                         with conn.cursor() as cursor:
                             cursor.execute("SET statement_timeout = '60s'")
+                            # Always store accuracy as fraction (0.0-1.0)
+                            acc_to_save = accuracy / 100.0 if accuracy > 1.0 else float(accuracy)
                             cursor.execute("""
                                 INSERT INTO dl_models_v2 (model_name, model_type, accuracy, model_data)
                                 VALUES (%s, %s, %s, %s);
-                            """, (model_name, 'LightGBM', float(accuracy), compressed_model))
+                            """, (model_name, 'LightGBM', acc_to_save, compressed_model))
                         conn.commit()
                         saved_count += 1
                         print(f"  ✅ {model_name}: {accuracy*100:.1f}% ({original_size:.2f}MB → {compressed_size:.2f}MB)")
@@ -516,7 +522,7 @@ class DatabaseManager:
                 elif not isinstance(data, dict):
                     data = {}
                 
-                trade_quality = trade.get('trade_quality', 'OK')
+                trade_quality = trade.get('trade_quality') or 'OK'
                 if trade_quality in ['TRAP', 'RISKY']:
                     trap_count += 1
                 
