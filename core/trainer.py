@@ -108,9 +108,9 @@ class DeepLearningTrainerLightGBM:
                 print("❌ No trades found in database")
                 return False
             
-            # Load NEW trades for existing models
-            oldest_timestamp = None
-            trades_new = self.db.load_training_data(since_timestamp=None)
+            # Load NEW trades for existing models (from oldest model timestamp)
+            oldest_timestamp = self.db.get_oldest_model_timestamp()
+            trades_new = self.db.load_training_data(since_timestamp=oldest_timestamp)
         else:
             # All models exist - check for new trades
             oldest_timestamp = self.db.get_oldest_model_timestamp()
