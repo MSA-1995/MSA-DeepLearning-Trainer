@@ -50,7 +50,7 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
 
             # ========== TECHNICAL INDICATORS ==========
             rsi = float(data.get('rsi', 50))
-            macd = float(data.get('macd', 0))
+            macd_diff = float(data.get('macd_diff', data.get('macd', 0)))
             volume_ratio = float(data.get('volume_ratio', 1.0))
             price_momentum = float(data.get('price_momentum', 0))
             atr = float(data.get('atr', 0))
@@ -104,7 +104,8 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
             sym_sentiment_avg = float(mem.get('sentiment_avg', 0) or 0)
             sym_whale_avg = float(mem.get('whale_confidence_avg', 0) or 0)
             sym_profit_loss_ratio = float(mem.get('profit_loss_ratio', 1.0) or 1.0)
-            sym_volume_trend = float(mem.get('volume_trend', 1.0) or 1.0)
+            _vt = mem.get('volume_trend', 1.0) or 1.0
+            sym_volume_trend = 1.2 if _vt == 'up' else (0.8 if _vt == 'down' else float(_vt) if str(_vt).replace('.','').isdigit() else 1.0)
             sym_panic_avg = float(mem.get('panic_score_avg', 0) or 0)
             sym_optimism_avg = float(mem.get('optimism_penalty_avg', 0) or 0)
             
@@ -124,7 +125,7 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
             # BUILD FEATURE VECTOR
             features = [
                 # Technical
-                rsi, macd, volume_ratio, price_momentum, atr,
+                rsi, macd_diff, volume_ratio, price_momentum, atr,
                 # News
                 news_score, news_pos, news_neg, news_total, news_ratio, has_news,
                 # Sentiment
@@ -170,7 +171,7 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
     # Feature names
     feature_names = [
         # Technical
-        'rsi', 'macd', 'volume_ratio', 'price_momentum', 'atr',
+        'rsi', 'macd_diff', 'volume_ratio', 'price_momentum', 'atr',
         # News
         'news_score', 'news_pos', 'news_neg', 'news_total', 'news_ratio', 'has_news',
         # Sentiment
@@ -200,11 +201,42 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
     X = pd.DataFrame(features_list, columns=feature_names)
     y = pd.Series(labels_list, name='target')
 
+    # =========================================================
+    # FIX: Survivorship Bias
+    # البوت يشتري الواثق فقط -> 90%+ labels = 1
+    # النموذج يتعلم كل شيء = BUY -> MetaModel:100% دايماً
+    # الحل: synthetic negatives بـ features معكوسة
+    # =========================================================
+    pos_count = int(sum(y))
+    neg_count = int(len(y) - pos_count)
+
+    if pos_count > 0 and neg_count / max(pos_count, 1) < 0.4:
+        print(f"  WARNING Imbalance: {pos_count} pos vs {neg_count} neg - generating synthetic negatives...")
+        rng = np.random.default_rng(42)
+        n_synthetic = pos_count - neg_count
+        pos_indices = np.where(y == 1)[0]
+        chosen = rng.choice(pos_indices, size=n_synthetic, replace=True)
+        syn = X.iloc[chosen].copy().reset_index(drop=True)
+        syn['rsi']            = rng.uniform(65, 95, n_synthetic)
+        syn['macd_diff']      = rng.uniform(-2.0, -0.1, n_synthetic)
+        syn['volume_ratio']   = rng.uniform(0.1, 0.7, n_synthetic)
+        syn['consensus']      = rng.uniform(0.0, 0.3, n_synthetic)
+        syn['buy_count']      = rng.integers(0, 2, n_synthetic).astype(float)
+        syn['sell_count']     = rng.integers(3, 7, n_synthetic).astype(float)
+        syn['price_momentum'] = rng.uniform(-0.05, -0.001, n_synthetic)
+        syn['opportunity']    = rng.uniform(0, 10, n_synthetic)
+        syn['risk_score']     = rng.uniform(15, 40, n_synthetic)
+        syn['market_quality'] = rng.uniform(0.1, 0.35, n_synthetic)
+        syn_labels = pd.Series([0] * n_synthetic, name='target')
+        X = pd.concat([X, syn], ignore_index=True)
+        y = pd.concat([y, syn_labels], ignore_index=True)
+        print(f"  OK Added {n_synthetic} synthetic negatives - balanced dataset")
+
     # Class balance info
     pos = int(sum(y))
     neg = int(len(y) - pos)
     ratio = neg / max(pos, 1)
-    print(f"  📈 Label balance: {pos} positive ({pos/len(y)*100:.1f}%) | {neg} negative | ratio={ratio:.1f}x")
+    print(f"  Label balance: {pos} positive ({pos/len(y)*100:.1f}%) | {neg} negative | ratio={ratio:.1f}x")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
