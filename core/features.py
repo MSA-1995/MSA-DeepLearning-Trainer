@@ -58,7 +58,7 @@ def calculate_enhanced_features(data, trade=None):
             full_data = data
         
         rsi          = full_data.get('rsi', 50)
-        macd         = full_data.get('macd', 0)
+        macd         = full_data.get('macd_diff', full_data.get('macd', 0))  # 🔧 fallback
         volume_ratio = full_data.get('volume_ratio', 1)
         price_momentum = full_data.get('price_momentum', 0)
 
@@ -86,7 +86,8 @@ def calculate_enhanced_features(data, trade=None):
         ema_21         = full_data.get('ema_21', 0)
         ema_crossover  = 1 if ema_9 > ema_21 else -1
         bid_ask_spread = full_data.get('bid_ask_spread', 0)
-        volume_trend   = full_data.get('volume_trend', 0)
+        _vt = full_data.get('volume_trend', 0)
+        volume_trend = 1.2 if _vt == 'up' else (0.8 if _vt == 'down' else (0.0 if _vt == 'neutral' else float(_vt or 0)))  # 🔧 handle string
         price_change_1h = full_data.get('price_change_1h', 0)
         
         # =========================================================
@@ -180,7 +181,7 @@ def calculate_enhanced_features(data, trade=None):
         fib_score = max(fib_score, fib_score_from_decision)
         
         # 13. Fibonacci level (المستوى المشفر)
-        fib_level = full_data.get('fib_level') or decision_factors.get('fib_level') if decision_factors else None
+        fib_level = full_data.get('fib_level') or (decision_factors.get('fib_level') if decision_factors else None)
         fib_level_map = {'0': 0, '23.6': 1, '38.2': 2, '50': 3, '61.8': 4, '78.6': 5, '100': 6}
         fib_level_encoded = fib_level_map.get(fib_level, 0) if fib_level else 0
 
@@ -274,7 +275,23 @@ def calculate_enhanced_features(data, trade=None):
         ]
     except Exception as e:
         print(f"⚠️ Feature calculation error: {e}")
-        return [50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0, 3, 0.5, 0, 0, 0.5, 1, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0]
+        # 43 features fallback (must match return list above exactly)
+        return [
+            # Technical (15)
+            50, 0, 1, 0, 0.5, 1, 50, 0, 1, 0, 1, 0, 0, 0, 0,
+            # Learning (6)
+            3, 0.5, 0, 0, 0.5, 1,
+            # Market/Time (7)
+            0, 0, 0.5, 0, 0, 0, 0.5,
+            # Fibonacci (2)
+            0, 0,
+            # Regime (4)
+            0.5, 0.4, 1.0, 1.0,
+            # Flash Crash (4)
+            0, 0, 0, 0,
+            # Whale + Additional (5)
+            0, 0, 0, 0, 0
+        ]
 
 
 def get_feature_names():
