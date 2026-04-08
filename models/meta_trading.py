@@ -114,6 +114,9 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
             sym_time_memory = float(mem.get('time_memory_modifier', 0) or 0)
             sym_pattern_score = float(mem.get('pattern_score', 0) or 0)
             sym_win_rate_boost = float(mem.get('win_rate_boost', 0) or 0)
+            
+            # العمود الجديد - smart stop loss
+            sym_smart_stop_loss = float(mem.get('smart_stop_loss', 0.0) or 0.0)
 
             # ========== DERIVED FEATURES ==========
             risk_score = (whale_activity * 0.1 + (1 - liq_score/100) * 20 + news_neg * 5)
@@ -192,8 +195,11 @@ def train_meta_trading(trades, voting_scores=None, since_timestamp=None, db_mana
         # Symbol Memory - New 7
         'sym_sentiment_avg', 'sym_whale_avg', 'sym_profit_loss_ratio', 'sym_volume_trend',
         'sym_panic_avg', 'sym_optimism_avg',
-        # Symbol Memory - New 4
-        'sym_courage_boost', 'sym_time_memory', 'sym_pattern_score', 'sym_win_rate_boost',
+            # Symbol Memory - New 4
+                 'sym_courage_boost', 'sym_time_memory', 'sym_pattern_score', 'sym_win_rate_boost',
+                 
+            # Symbol Memory - New column for smart stop loss
+                 'sym_smart_stop_loss',
         # Context
         'hours_held'
     ]
