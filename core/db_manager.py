@@ -148,6 +148,41 @@ class DatabaseManager:
         finally:
             close_db_connection(conn)
 
+    def calculate_voting_accuracy(self, trades):
+        """حساب دقة تصويت كل مستشار بناءً على نتائج الصفقات الحقيقية"""
+        advisors = ['smart_money', 'risk', 'anomaly', 'exit', 'pattern', 'liquidity', 'chart_cnn', 'sentiment', 'crypto_news', 'volume_pred']
+        results = {adv: {'tp_accuracy': 0.5, 'sell_accuracy': 0.5} for adv in advisors}
+        
+        if not trades:
+            return results
+
+        advisor_stats = {adv: {'hits': 0, 'total': 0} for adv in advisors}
+
+        for t in trades:
+            try:
+                raw_data = t.get('data', {})
+                if isinstance(raw_data, str):
+                    data = json.loads(raw_data)
+                else:
+                    data = raw_data
+                
+                buy_votes = data.get('buy_votes', {})
+                profit = float(t.get('profit_percent', 0))
+
+                for adv, vote in buy_votes.items():
+                    if adv in advisor_stats and vote == 1:
+                        advisor_stats[adv]['total'] += 1
+                        if profit > 0.5:  # اعتبار التصويت ناجحاً إذا تحقق ربح
+                            advisor_stats[adv]['hits'] += 1
+            except:
+                continue
+
+        for adv in advisors:
+            if advisor_stats[adv]['total'] > 0:
+                results[adv]['tp_accuracy'] = advisor_stats[adv]['hits'] / advisor_stats[adv]['total']
+        
+        return results
+
     # ========== Save ==========
 
     def save_models_to_db(self, models, results, retry=3):
