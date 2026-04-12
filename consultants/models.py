@@ -36,6 +36,13 @@ def _train_lgb(X, y, feature_names, n_estimators=50, max_depth=3, learning_rate=
     pos = int(sum(y_s))
     neg = int(len(y_s) - pos)
     ratio = neg / max(pos, 1)
+
+    # ✅ حماية من خطأ الفئة الواحدة (Small Dataset Protection)
+    unique, counts = np.unique(y_s, return_counts=True)
+    if len(unique) < 2 or any(counts < 2):
+        print(f"    ⚠️ Data too imbalanced or insufficient for {feature_names[0]}... skipping split.")
+        return None
+
     print(f"    Label balance: {pos} positive ({pos/len(y_s)*100:.1f}%) | {neg} negative | ratio={ratio:.1f}x")
     
     X_train, X_test, y_train, y_test = train_test_split(X_df, y_s, test_size=0.2, random_state=42)
